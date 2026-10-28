@@ -2,6 +2,13 @@
 
 **Read this first.** Updated after every finished task. Newest log entries at the bottom of the log.
 
+## Where things stand (end of the autonomous run, 2026-10-28)
+- **Phase 0, 1, 2: done.** All extras from TASK §5 done as well (pipeline, CPU baselines, `ml.train --dry-run`).
+- **Run it:** `make up && make seed` → <http://localhost:8080> (API docs at `/docs`). `make test` runs every check.
+- **Predictions on the site:** 5-day horizon from the CPU LightGBM baseline (`lgbm-cpu-93314193`, run `uv run python -m ml.serving.batch_predict --database-url postgresql://stock:stock@localhost:55433/stock` after `make seed`); other horizons are mock. The "Demo predictions" badge stays on because the model failed the promotion rule (docs/BACKTEST_REPORT.md).
+- **Needs you:** push to GitHub to get the first CI run (BLOCKERS #5); decide on KASE data licensing before any public launch (BLOCKERS #2); optional `LLM_*` variables to switch the trade reviewer to a real LLM.
+- **Key docs:** DECISIONS (D-001…D-031), DATA_SOURCES, ARCHITECTURE, GPU_PLAN, DATA_REPORT, BACKTEST_REPORT, BLOCKERS.
+
 ## Phase checklist
 
 ### Phase 0 — Research and architecture
@@ -29,9 +36,9 @@
 - [x] 2.1 `docs/GPU_PLAN.md` complete (environment, pipeline, features, models, VRAM budget, backtest, MLflow, integration, checklist, cloud fallback)
 
 ### Extra (if time left)
-- [ ] E.1 Data pipeline for real
-- [ ] E.2 Shared feature module + CPU LightGBM/XGBoost baselines
-- [ ] E.3 `python -m ml.train --config ... --dry-run`
+- [x] E.1 Data pipeline for real
+- [x] E.2 Shared feature module + CPU LightGBM/XGBoost baselines
+- [x] E.3 `python -m ml.train --config ... --dry-run`
 
 ## Log
 
@@ -69,3 +76,9 @@
 - **Not verified (no GPU):** actual throughput/VRAM numbers in §5 are estimates — the plan says to measure them on day 1–2.
 
 **Phase 2 Definition of Done: met.**
+
+### 2026-10-28 — Extras (TASK §5): data pipeline, CPU baselines, training skeleton (commits `d9114fc`, `fdfe3fa` + this one)
+- **E.1 Data pipeline** (`data_pipeline/`, `python -m data_pipeline universe|backfill|daily|report`): polite HTTP with per-source rate limits and retries, Parquet lake with idempotent upserts and a manifest. Loaded: top-100 liquid US universe (Alpaca + SEC, D-028), **340 683 US bars 2010→2026** (Alpaca SIP raw + adjusted from 2016, Yahoo before), 2 466 corporate actions, **41 898 KZ bars** (KASE back to 2004 + LSE GDRs), 37 895 market rows (SPY, QQQ, ^GSPC, ^NDX, ^VIX, KZT=X, BZ=F), 41 841 FRED rows (first-release vintages for CPI/unemployment), 666 NBK official rates (2025→), 141 335 SEC facts for 98 companies with acceptance timestamps. Lake size 14 MB. `docs/DATA_REPORT.md` generated (coverage, split-explained jumps, gaps, KZ liquidity, publication lags).
+- **E.2 Features + baselines** (`ml/`): one feature module (44 features, macro joined on publication date), walk-forward with purge + embargo, persistence/momentum/logreg/LightGBM/XGBoost, metrics (AUC, IC, hit rate, Sharpe, Sortino, max DD, turnover), MLflow (`mlruns/mlflow.db`). Results in `docs/BACKTEST_REPORT.md`: LightGBM OOS AUC 0.516, IC 0.013 (t 2.8) — beats the baselines on IC but its strategy Sharpe (0.92) is below the equal-weight benchmark (1.36) → not promoted (D-030). Plugged into the website through batch inference (`ml/serving/batch_predict.py`) → 22 tickers show `lgbm-cpu-93314193` 5-day predictions with SHAP factors.
+- **E.3** `python -m ml.train --config ml/configs/short_gbm.yaml --dry-run` runs on synthetic data in ≈ 12 s. Research tests: 9 pass (incl. the no-look-ahead test).
+- **Problems found & fixed:** httpx logged full URLs (FRED key is a query parameter) → silenced; FRED vintage mode returned no data for daily series → vintages only for revised series; NBK connection error stopped the backfill → per-day error handling; fundamentals O(n²) rewrites hit the time limit → batched + resumable; port 5433 already in use on this Mac → Postgres mapped to 127.0.0.1:55433 (site was briefly down, restored and re-verified); LightGBM needs `brew install libomp` on macOS (installed).

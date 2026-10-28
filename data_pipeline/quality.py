@@ -136,7 +136,7 @@ def build_report() -> str:
         )
         m["median_lag_days"] = m["series_id"].map(lag.groupby("series_id")["lag"].median())
         parts += [
-            "## Macro (FRED, first-release vintages)\n",
+            "## Macro (FRED)\n",
             _md(m),
             "`median_lag_days` = typical delay between the observation date and its first publication — "
             "features must use `available_at`, not `date`.\n",
@@ -147,16 +147,21 @@ def build_report() -> str:
             f"range {fx['usdkzt'].min():.2f}–{fx['usdkzt'].max():.2f}.\n"
         )
     if not fund.empty:
-        lagd = (
-            pd.to_datetime(fund["available_at"], utc=True).dt.tz_localize(None)
-            - pd.to_datetime(fund["period_end"])
-        ).dt.days
+        first = (
+            fund.assign(av=pd.to_datetime(fund["available_at"], utc=True).dt.tz_localize(None))
+            .groupby(["symbol", "metric", "period_end"])["av"]
+            .min()
+            .reset_index()
+        )
+        lagd = (first["av"] - pd.to_datetime(first["period_end"])).dt.days
         parts += [
             "## US fundamentals (SEC companyfacts)\n",
             f"- {fund['symbol'].nunique()} companies, {len(fund):,} facts, metrics: "
             f"{', '.join(sorted(fund['metric'].unique()))}.\n",
-            f"- Median delay period end → publication: {lagd.median():.0f} days "
-            "(this is why `period_end` must never be used as the feature date).\n",
+            f"- Delay from period end to **first** publication: median {lagd.median():.0f} days, "
+            f"90th percentile {lagd.quantile(0.9):.0f} days — features must use `available_at` "
+            "(SEC acceptance time), never `period_end`. Later filings repeat old periods; the first one counts.\n",
+            "- Foreign private issuers (20-F, IFRS taxonomy) are missing or sparse (e.g. ADRs such as TSM, ASML).\n",
         ]
     parts += [
         "## Known limitations\n",
