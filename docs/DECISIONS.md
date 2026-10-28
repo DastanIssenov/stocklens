@@ -85,3 +85,23 @@ Newest decisions are appended at the bottom.
 ### D-023 — Mock prediction text: EN and RU; KK falls back to RU
 - **Decision:** rule-based review texts exist in English and Russian; Kazakh-locale users get Russian review text until a translation is added (the UI itself has KK strings).
 - **Why:** time; Russian is understood by most KZ users. The LLM reviewer already answers in Kazakh when asked.
+
+## Phase 1 — frontend
+
+### D-024 — Client-side data fetching with TanStack Query; keep `cacheComponents`
+- **Decision:** pages are thin server components that render client views; data comes from `/api/v1` via TanStack Query. The Next.js 16 template default `cacheComponents: true` is kept; hooks that read the URL (`usePathname`, `useParams`) are wrapped in `Suspense` as the bundled docs require.
+- **Why:** almost all data is per-user or changes every minute; client fetching keeps one source of truth (the FastAPI API) and makes the site work behind any reverse proxy.
+- **Alternatives:** server components fetching from the backend over the Docker network (needs a second base URL and token forwarding).
+
+### D-025 — JWTs stored in `localStorage`
+- **Decision:** access + refresh tokens are kept in `localStorage`; a 401 triggers one refresh attempt.
+- **Why:** simplest flow that works both through nginx and with the dev proxy. Risk: XSS could read tokens. Mitigations: React escapes output, no `dangerouslySetInnerHTML`, external links use `rel="noopener noreferrer"`, access tokens live 15 min.
+- **Later:** move the refresh token to an `HttpOnly; Secure; SameSite=Strict` cookie set by the backend once the site runs on one domain in production.
+
+### D-026 — Own tiny i18n instead of next-intl
+- **Decision:** typed dictionaries in `src/lib/i18n.ts` (EN, RU, KK) + a context; no locale in the URL.
+- **Why:** three languages, ~130 strings, no SEO requirement for translated URLs. Kazakh UI is included (TASK asked "KZ if time allows").
+
+### D-027 — Kazakh-language detection for KZ feeds
+- **Decision:** items from RU/KK feeds are labelled `kk` when the text contains letters that exist only in Kazakh (ә ғ қ ң ө ұ ү һ і), otherwise `ru`.
+- **Why:** verified that Kapital.kz publishes Kazakh articles in its Russian feed. A full language-ID model is planned for the GPU phase.

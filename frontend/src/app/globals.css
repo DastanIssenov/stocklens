@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Noto Sans",
+    sans-serif;
+}
+
+/* hide number spinners for compact inputs */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.4;
+}

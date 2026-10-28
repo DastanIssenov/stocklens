@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -46,6 +47,16 @@ RSS_FEEDS: tuple[Feed, ...] = (
 )
 
 
+_KAZAKH_LETTERS = re.compile("[әғқңөұүһіӘҒҚҢӨҰҮҺІ]")
+
+
+def detect_lang(text: str, feed_lang: str) -> str:
+    """Kazakh outlets mix RU and KK articles in one feed: letters that exist only in Kazakh decide."""
+    if feed_lang in ("ru", "kk"):
+        return "kk" if _KAZAKH_LETTERS.search(text) else "ru"
+    return feed_lang
+
+
 def _entry_time(e: Any) -> dt.datetime:
     for key in ("published_parsed", "updated_parsed"):
         t = e.get(key)
@@ -64,7 +75,7 @@ def parse_feed(content: bytes, feed: Feed) -> list[NewsItem]:
         items.append(
             NewsItem(
                 source=feed.name,
-                lang=feed.lang,
+                lang=detect_lang(f"{title} {e.get('summary') or ''}", feed.lang),
                 published_at=_entry_time(e),
                 title=title,
                 url=link,

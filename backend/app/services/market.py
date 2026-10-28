@@ -273,14 +273,16 @@ async def market_overview(session: AsyncSession, market: str, spark_days: int = 
             )
         )
     with_change = [r for r in out if r.change_pct is not None]
-    gainers = sorted(with_change, key=lambda r: r.change_pct or 0, reverse=True)[:5]
-    losers = sorted(with_change, key=lambda r: r.change_pct or 0)[:5]
+    gainers = sorted(
+        (r for r in with_change if (r.change_pct or 0) > 0), key=lambda r: r.change_pct or 0, reverse=True
+    )
+    losers = sorted((r for r in with_change if (r.change_pct or 0) < 0), key=lambda r: r.change_pct or 0)
     brent = await latest_macro(session, "BRENT")
     return MarketOverview(
         market=market,
         rows=out,
-        gainers=gainers,
-        losers=losers,
+        gainers=gainers[:5],
+        losers=losers[:5],
         fx=await usdkzt(session),
         brent=brent[1] if brent else None,
         brent_date=brent[0] if brent else None,

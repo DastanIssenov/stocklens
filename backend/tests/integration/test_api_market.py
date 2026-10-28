@@ -92,6 +92,8 @@ async def test_market_overview_and_fx(client, session) -> None:  # type: ignore[
     r = await client.get("/api/v1/market/overview", params={"market": "US"})
     body = r.json()
     assert r.status_code == 200
+    assert all(g["change_pct"] > 0 for g in body["gainers"])
+    assert all(x["change_pct"] < 0 for x in body["losers"])
     assert {row["symbol"] for row in body["rows"]} == {"AAPL", "MSFT"}
     assert len(body["rows"][0]["sparkline"]) == 30
     assert body["fx"]["official"] == 451.05 and body["fx"]["rate_used"] == 451.05

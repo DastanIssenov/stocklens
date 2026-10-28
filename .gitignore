@@ -41,3 +41,4 @@ mlartifacts/
 .vscode/
 *.log
 .venv-research/
+.claude/

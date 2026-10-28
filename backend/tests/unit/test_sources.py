@@ -228,3 +228,9 @@ async def test_nbk_and_finnhub_requests() -> None:
     assert len(items) == 1 and items[0].symbols == ["AAPL"] and items[0].source == "yahoo"
     sent = respx.calls.last.request.url.params
     assert sent["symbol"] == "AAPL"
+
+
+def test_detect_lang_for_kz_feeds() -> None:
+    assert feeds.detect_lang("Акции Казатомпрома выросли", "ru") == "ru"
+    assert feeds.detect_lang("Қазақтелеком жаңа шешімдерін ұсынды", "ru") == "kk"
+    assert feeds.detect_lang("Apple shares rise", "en") == "en"
