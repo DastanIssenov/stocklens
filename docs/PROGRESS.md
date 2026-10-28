@@ -12,12 +12,12 @@
 - [x] 0.5 Decisions recorded → `docs/DECISIONS.md` (D-001…D-018)
 
 ### Phase 1 — Website
-- [ ] 1.1 Backend skeleton: config, structlog, `/health`, tooling (ruff, mypy, pytest)
-- [ ] 1.2 DB models + Alembic migrations (Timescale hypertable, pgvector)
-- [ ] 1.3 Auth (register / login / refresh, argon2, JWT)
-- [ ] 1.4 Tickers, prices, news, FX, market overview endpoints + Redis cache + rate limiting
-- [ ] 1.5 ML interface: mock prediction provider, mock + OpenAI-compatible trade reviewer
-- [ ] 1.6 Paper trading (USD/KZT cash, fees, P&L, history) + trade reviews
+- [x] 1.1 Backend skeleton: config, structlog, `/health`, tooling (ruff, mypy, pytest)
+- [x] 1.2 DB models + Alembic migrations (Timescale hypertable, pgvector)
+- [x] 1.3 Auth (register / login / refresh, argon2, JWT)
+- [x] 1.4 Tickers, prices, news, FX, market overview endpoints + Redis cache + rate limiting
+- [x] 1.5 ML interface: mock prediction provider, mock + OpenAI-compatible trade reviewer
+- [x] 1.6 Paper trading (USD/KZT cash, fees, P&L, history) + trade reviews
 - [ ] 1.7 Data connectors (Alpaca, Tradernet, yfinance, Finnhub, RSS, NBK) + Celery/Beat tasks + seed command
 - [ ] 1.8 WebSocket `/ws/prices` via Redis pub/sub
 - [ ] 1.9 Backend tests ≥ 70 % coverage
@@ -40,3 +40,8 @@
 - **Verified:** Alpaca bars (SIP from 2016-01-04, IEX from 2020-07-27, 200 req/min), Alpaca news (since 2015), Finnhub (60 req/min, news ~1 year, candles are premium), SEC companyfacts/submissions/frames, FRED series (no KZT series exists), yfinance (US + LSE GDRs + KZT=X + BZ=F), Tradernet getHloc for all 10 KASE Index shares (no auth), NBK official USD/KZT XML, 7 US + 7 KZ RSS feeds, GDELT.
 - **Key findings:** KASE data is free only through the broker API (licence question → BLOCKERS #2); AIX has no free data (BLOCKERS #3); Tradernet bars are `[high, low, open, close]` with Almaty-midnight timestamps.
 - **Left:** Phase 1 and 2.
+
+### 2026-10-28 — Backend core (commit `228f021`)
+- **Done:** FastAPI app (config, structlog, `/health`), SQLAlchemy models + Alembic migration `0001` (Timescale hypertable `prices_daily`, pgvector `news.embedding vector(1024)`), JWT auth with argon2id, tickers/search, prices + latest quote, market overview, FX, news (vendor tags + RU/KK/EN alias linking, issuer-level sharing), predictions (mock provider, stored per as-of date), paper trading (USD/KZT cash, per-exchange fees, average cost, realised P&L), trade reviews (mock rule-based + OpenAI-compatible LLM with strict JSON + fallback), Redis cache + fixed-window rate limits, WebSocket hub.
+- **Verified:** `alembic upgrade/downgrade` round-trip and `alembic check` (models == migration); ruff + mypy clean; 40 tests pass against real Timescale + Redis containers (`infra/docker-compose.test.yml`), coverage 92 %.
+- **Left:** data connectors + Celery/Beat + seed; WebSocket tests; frontend; infra; GPU plan.
