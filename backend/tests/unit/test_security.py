@@ -39,3 +39,11 @@ def test_settings_normalise_db_url_and_hide_secrets() -> None:
     assert "abc" not in repr(s)
     assert s.alpaca_configured is False  # secret missing
     assert Settings(cors_origins="a, b", _env_file=None).cors_origin_list == ["a", "b"]
+
+
+def test_prod_refuses_default_jwt_secret() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, environment="prod", jwt_secret="dev-only-change-me-please-32-bytes-min")
+    assert Settings(_env_file=None, environment="prod", jwt_secret="x" * 40).environment == "prod"

@@ -39,8 +39,8 @@ class PriceHub:
 
     async def _listen(self) -> None:
         while True:
+            pubsub = get_redis().pubsub()
             try:
-                pubsub = get_redis().pubsub()
                 await pubsub.subscribe(PRICES_CHANNEL)
                 async for msg in pubsub.listen():
                     if msg.get("type") != "message":
@@ -51,6 +51,9 @@ class PriceHub:
             except Exception as e:  # reconnect after Redis hiccups
                 log.warning("price_hub_error", error=str(e))
                 await asyncio.sleep(2)
+            finally:
+                with contextlib.suppress(Exception):
+                    await pubsub.aclose()
 
     async def broadcast(self, quote: dict[str, Any]) -> None:
         sym = quote.get("symbol")

@@ -68,6 +68,7 @@ async def _database() -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.run_sync(_upgrade)
     yield
+    await redis_mod.close_redis()
     await engine.dispose()
 
 

@@ -10,13 +10,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _REPO_DIR = _BACKEND_DIR.parent
 
 DISCLAIMER = "Educational project. Predictions and reviews are not investment advice."
+DEV_JWT_SECRET = "dev-only-change-me-please-32-bytes-min"  # noqa: S105 - refused in prod by the validator
 
 
 class Settings(BaseSettings):
@@ -40,7 +41,7 @@ class Settings(BaseSettings):
     celery_broker_url: str | None = None
 
     # --- auth ---
-    jwt_secret: SecretStr = SecretStr("dev-only-change-me-please-32-bytes-min")
+    jwt_secret: SecretStr = SecretStr(DEV_JWT_SECRET)
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 15
     refresh_token_days: int = 7
@@ -103,6 +104,12 @@ class Settings(BaseSettings):
         if v.startswith("postgresql://"):
             v = "postgresql+asyncpg://" + v[len("postgresql://") :]
         return v
+
+    @model_validator(mode="after")
+    def _prod_needs_real_secret(self) -> Settings:
+        if self.environment == "prod" and self.jwt_secret.get_secret_value() == DEV_JWT_SECRET:
+            raise ValueError("JWT_SECRET must be set in production")
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
