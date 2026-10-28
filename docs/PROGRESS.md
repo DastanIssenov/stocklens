@@ -38,7 +38,7 @@
 ### 2026-10-28 — Phase 0 done
 - **Done:** fixed `.gitignore`/`.env` layout, created repo and folder skeleton; probed every data source with a few real requests (scripts in `scripts/research/`); wrote `DATA_SOURCES.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `BLOCKERS.md`.
 - **Verified:** Alpaca bars (SIP from 2016-01-04, IEX from 2020-07-27, 200 req/min), Alpaca news (since 2015), Finnhub (60 req/min, news ~1 year, candles are premium), SEC companyfacts/submissions/frames, FRED series (no KZT series exists), yfinance (US + LSE GDRs + KZT=X + BZ=F), Tradernet getHloc for all 10 KASE Index shares (no auth), NBK official USD/KZT XML, 7 US + 7 KZ RSS feeds, GDELT.
-- **Key findings:** KASE data is free only through the broker API (licence question → BLOCKERS #2); AIX has no free data (BLOCKERS #3); Tradernet bars are `[high, low, open, close]` with Almaty-midnight timestamps.
+- **Key findings:** KASE data is free only through the broker API (licence question → BLOCKERS #2); AIX has no free data (BLOCKERS #3); Tradernet bars are `[high, low, open, close]` with Moscow-midnight timestamps (corrected later the same day).
 - **Left:** Phase 1 and 2.
 
 ### 2026-10-28 — Backend core (commit `228f021`)

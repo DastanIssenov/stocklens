@@ -143,7 +143,7 @@ Not working: `finance.yahoo.com/news/rssindex` (404); MarketWatch "marketpulse" 
    'q={"cmd":"getHloc","params":{"id":"HSBK.KZ,KSPI.KZ,KZTK.KZ","count":-1,"timeframe":1440,"date_from":"01.01.2010 00:00","date_to":"28.10.2026 00:00","intervalMode":"ClosedRay"}}'
   # → {"hloc":{"HSBK.KZ":[[high,low,open,close],...]},"vl":{"HSBK.KZ":[vol,...]},"xSeries":{"HSBK.KZ":[unix_ts,...]},"info":{...,"mkt_name":"KASE","currency":"KZT"},...}
   ```
-  Format gotchas (verified): bar order is **[high, low, open, close]**; `xSeries` timestamps are Almaty-local midnight, so convert with `Asia/Almaty` before taking the date (in UTC they fall on the previous day); several tickers per request with a **comma-separated** `id`; unknown tickers return `{"error": "Failed to find instruments..."}`.
+  Format gotchas (verified): bar order is **[high, low, open, close]**; `xSeries` timestamps are **Moscow midnight (21:00 UTC of the previous day)**, so convert with `Europe/Moscow` before taking the date — verified on 2020 bars: a bar dated Sunday 2020-01-05 appears, which was an official working day in Kazakhstan (moved from Friday 2020-01-03, which has no bar); several tickers per request with a **comma-separated** `id`; unknown tickers return `{"error": "Failed to find instruments..."}`.
 - **KASE Index representative list (kase.kz, 28.10.2026) — all verified on Tradernet:**
 
 | KASE ticker | Company | Weight % | Tradernet id | First bar | Rows |
