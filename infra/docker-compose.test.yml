@@ -1,0 +1,25 @@
+# Throw-away Postgres (Timescale + pgvector) and Redis for the backend test-suite.
+# Started by `make test`; ports differ from the dev stack so both can run at once.
+name: stock-platform-test
+services:
+  db-test:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: stock
+      POSTGRES_PASSWORD: stock
+      POSTGRES_DB: stock_test
+    ports: ["55432:5432"]
+    tmpfs: ["/home/postgres/pgdata:uid=1000,gid=1000,mode=0700"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stock -d stock_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis-test:
+    image: redis:7-alpine
+    ports: ["56379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
