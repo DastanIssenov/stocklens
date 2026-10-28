@@ -26,7 +26,7 @@
 - [x] 1.12 End-to-end check: `make up` + `make seed` from scratch, register, browse, trade, review
 
 ### Phase 2 — GPU plan
-- [ ] 2.1 `docs/GPU_PLAN.md` complete (environment, pipeline, features, models, VRAM budget, backtest, MLflow, integration, checklist, cloud fallback)
+- [x] 2.1 `docs/GPU_PLAN.md` complete (environment, pipeline, features, models, VRAM budget, backtest, MLflow, integration, checklist, cloud fallback)
 
 ### Extra (if time left)
 - [ ] E.1 Data pipeline for real
@@ -62,3 +62,10 @@
 - **Not verified:** GitHub Actions itself (repo is not pushed — TASK §0.4 says do not push). The CI steps were run locally with the same commands. See BLOCKERS #5.
 
 **Phase 1 Definition of Done: met** (except the remote CI run, which needs a push).
+
+### 2026-10-28 — Phase 2: GPU plan
+- **Done:** `docs/GPU_PLAN.md` (environment with exact pins, data pipeline with sizes/times and look-ahead rules, feature list, models incl. LLM candidates and training data with licences, VRAM/time budget, backtest and metrics, MLflow registry flow, website integration by config, 10-day checklist with "done when", risks/fallbacks, cloud prices). Added `scripts/gpu/verify_env.py` (nvidia-smi, torch CUDA + sm_120 kernels, bf16 matmul, SDPA, bitsandbytes NF4, XGBoost/LightGBM GPU, vLLM import), `scripts/gpu/setup_train_env.sh`, `scripts/gpu/setup_vllm.sh`.
+- **Verified facts (2026-10-28):** torch 2.13.0/2.14.1 default wheels are CUDA 13.0; vLLM 0.32.0 pins torch 2.13.0 and transformers <5.20; `vllm/vllm-openai:v0.32.0` exists (9.2 GB); vLLM sm_120 wheel issue closed 2026-05-15; NVFP4 on sm_120 still problematic → bf16/AWQ; flash-attn only as sdist → SDPA default; model IDs/licences on Hugging Face (Qwen3-8B Apache-2.0 default; Qwen3.5-9B is a new hybrid-attention VL model; Sherkala/KazLLM non-commercial, gated); dataset licences; cloud 5090 ≈ $0.4–1.2/h; Alpaca corporate-actions endpoint works.
+- **Not verified (no GPU):** actual throughput/VRAM numbers in §5 are estimates — the plan says to measure them on day 1–2.
+
+**Phase 2 Definition of Done: met.**
