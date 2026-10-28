@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Prediction, Ticker
 from app.ml_interface.base import (
+    ALL_HORIZONS,
     LONG_HORIZONS,
     SHORT_HORIZONS,
+    Horizon,
     PredictionContext,
     PredictionProvider,
     PredictionResult,
@@ -64,10 +66,14 @@ async def store_predictions(session: AsyncSession, ticker_id: int, results: list
 
 
 async def compute_predictions(
-    session: AsyncSession, ticker: Ticker, provider: PredictionProvider, as_of: dt.date | None = None
+    session: AsyncSession,
+    ticker: Ticker,
+    provider: PredictionProvider,
+    as_of: dt.date | None = None,
+    horizons: tuple[Horizon, ...] = ALL_HORIZONS,
 ) -> list[PredictionResult]:
     series = await recent_series(session, ticker.id, n=300, as_of=as_of)
-    if not series.dates:
+    if not series.dates or not horizons:
         return []
     ctx = PredictionContext(
         symbol=ticker.symbol,
@@ -76,47 +82,43 @@ async def compute_predictions(
         as_of_date=series.dates[-1],
         closes=series.closes,
         volumes=series.volumes,
+        horizons=horizons,
     )
     return await provider.predict(ctx)
+
+
+async def _rows_for(session: AsyncSession, ticker_id: int, as_of: dt.date) -> list[Prediction]:
+    # trained models first (mock rows only fill the gaps), newest run first
+    is_mock = Prediction.model_version.like("mock%")
+    stmt = (
+        select(Prediction)
+        .where(Prediction.ticker_id == ticker_id, Prediction.as_of_date == as_of)
+        .order_by(Prediction.horizon_days, is_mock, Prediction.created_at.desc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
 
 
 async def get_predictions(
     session: AsyncSession, ticker: Ticker, provider: PredictionProvider
 ) -> PredictionsOut:
+    """Latest prediction per horizon for the latest bar. Horizons that no stored model run covers
+    (e.g. a batch job wrote only `5d`) are computed with the active provider and stored."""
     series = await recent_series(session, ticker.id, n=1)
     rows: list[Prediction] = []
     if series.dates:
         as_of = series.dates[-1]
-        rows = list(
-            (
-                await session.execute(
-                    select(Prediction)
-                    .where(Prediction.ticker_id == ticker.id, Prediction.as_of_date == as_of)
-                    .order_by(Prediction.horizon_days, Prediction.created_at.desc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not rows:  # nothing precomputed for the latest bar yet → compute now and store
-            results = await compute_predictions(session, ticker, provider)
-            await store_predictions(session, ticker.id, results)
-            await session.commit()
-            rows = list(
-                (
-                    await session.execute(
-                        select(Prediction)
-                        .where(Prediction.ticker_id == ticker.id, Prediction.as_of_date == as_of)
-                        .order_by(Prediction.horizon_days)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+        rows = await _rows_for(session, ticker.id, as_of)
+        missing = tuple(h for h in ALL_HORIZONS if h not in {r.horizon for r in rows})
+        if missing:
+            results = await compute_predictions(session, ticker, provider, horizons=missing)
+            if results:
+                await store_predictions(session, ticker.id, results)
+                await session.commit()
+                rows = await _rows_for(session, ticker.id, as_of)
     latest: dict[str, Prediction] = {}
-    for r in rows:  # one row per horizon (first = newest model run)
+    for r in rows:  # one row per horizon (first = trained model if any, newest run)
         latest.setdefault(r.horizon, r)
-    outs = [_to_out(p) for p in latest.values()]
+    outs = sorted((_to_out(p) for p in latest.values()), key=lambda o: o.horizon_days)
     return PredictionsOut(
         symbol=ticker.symbol,
         short_term=[o for o in outs if o.horizon in SHORT_HORIZONS],

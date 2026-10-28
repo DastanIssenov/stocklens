@@ -25,6 +25,9 @@ services:
       POSTGRES_DB: stock
     volumes:
       - pgdata:/home/postgres/pgdata
+    ports:
+      # localhost only: lets the research env (ml/serving/batch_predict.py) write predictions
+      - "127.0.0.1:${DB_PORT:-55433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stock -d stock"]
       interval: 5s

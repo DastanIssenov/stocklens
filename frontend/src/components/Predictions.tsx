@@ -24,7 +24,14 @@ function Row({ p }: { p: Prediction }) {
   return (
     <li className="rounded-lg border border-neutral-100 p-3 dark:border-neutral-800">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-sm font-semibold">{HORIZON_LABEL[locale][p.horizon] ?? p.horizon}</span>
+        <span className="text-sm font-semibold">
+          {HORIZON_LABEL[locale][p.horizon] ?? p.horizon}
+          {!p.model_version.startsWith("mock") && (
+            <span className="ml-1.5 rounded bg-sky-100 px-1 font-mono text-[10px] font-normal text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+              {p.model_version}
+            </span>
+          )}
+        </span>
         <span className={`text-sm font-semibold tabular-nums ${changeColor(p.predicted_return)}`}>
           {pct(p.predicted_return)}
         </span>

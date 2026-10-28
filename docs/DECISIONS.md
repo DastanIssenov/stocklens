@@ -105,3 +105,24 @@ Newest decisions are appended at the bottom.
 ### D-027 — Kazakh-language detection for KZ feeds
 - **Decision:** items from RU/KK feeds are labelled `kk` when the text contains letters that exist only in Kazakh (ә ғ қ ң ө ұ ү һ і), otherwise `ru`.
 - **Why:** verified that Kapital.kz publishes Kazakh articles in its Russian feed. A full language-ID model is planned for the GPU phase.
+
+## Extras (TASK §5) — data pipeline and CPU baselines
+
+### D-028 — US research universe = top-100 liquid operating companies from Alpaca + SEC
+- **Decision:** candidates = active, tradable Alpaca NASDAQ/NYSE equities ∩ SEC `company_tickers.json`, minus funds/ETFs/notes by name, one listing per CIK; ranked by 60-day median dollar volume; plus the website's seed tickers.
+- **Why:** TASK allows "NASDAQ-100 or the 100 most liquid stocks". Wikipedia (the usual NASDAQ-100 source) rejects bots without contact details in the User-Agent, and I did not want to send the owner's e-mail (`SEC_USER_AGENT`) to a non-SEC service. The liquidity universe uses only official APIs we already have keys for.
+- **Known issue:** survivorship bias — this is *today's* list. Documented in DATA_REPORT; point-in-time membership is in GPU_PLAN §2.1.
+
+### D-029 — Research workspace at the repo root
+- **Decision:** `data_pipeline/` and `ml/` share a root `pyproject.toml` (uv, `.venv`), separate from the website backend. The pipeline has its own synchronous, bulk-oriented connectors (pagination, resume, Parquet), and imports only the pure ticker definitions from `backend/app/services/universe.py`.
+- **Why:** heavy ML dependencies (LightGBM, XGBoost, MLflow) stay out of the web image; the website keeps working without them.
+- **Note:** LightGBM on macOS needs `brew install libomp` (installed on this machine).
+
+### D-030 — Promotion rule for trained models; CPU baselines stay "demo"
+- **Decision:** the batch job (`ml/serving/batch_predict.py`) writes LightGBM predictions with `model_version = lgbm-cpu-<run>`; `is_demo = false` only if out-of-sample IC t-stat ≥ 2, AUC ≥ 0.52 and strategy Sharpe > benchmark Sharpe (after costs). Otherwise `is_demo = true` and the UI keeps the "Demo predictions" badge while showing the model version.
+- **Why:** a weak CPU baseline must not look like a validated model to users (TASK §6: never promise returns).
+- **How it reaches the site:** stored rows of a trained model win over mock rows for the same horizon; horizons without a trained model are filled by the mock provider (`services/predictions.py`).
+
+### D-031 — Postgres published on 127.0.0.1:5433 in docker-compose
+- **Decision:** `db` maps `127.0.0.1:${DB_PORT:-5433}:5432` so the research env can write batch predictions.
+- **Why:** offline batch inference is the GPU-phase integration pattern (GPU_PLAN §8.2). Bound to localhost only.

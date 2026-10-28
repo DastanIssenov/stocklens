@@ -141,7 +141,11 @@ def backfill_nbk(start: dt.date, end: dt.date | None = None) -> int:
         d = start
         while d <= end:
             if d not in done:
-                v = others.nbk_usd(nc, d)
+                try:
+                    v = others.nbk_usd(nc, d)
+                except SourceError as e:  # transient network errors: skip the day, a re-run fills it
+                    log.warning("nbk %s skipped: %s", d, e)
+                    v = None
                 if v:
                     rows.append({"date": d, "usdkzt": v})
                 if len(rows) >= 50:
@@ -155,26 +159,29 @@ def backfill_nbk(start: dt.date, end: dt.date | None = None) -> int:
     return n
 
 
-def backfill_fundamentals(symbols: list[str] | None = None) -> int:
+def backfill_fundamentals(symbols: list[str] | None = None, batch: int = 10) -> int:
+    """SEC companyfacts → selected metrics with publication timestamps. Resumable: skips companies already in
+    the lake; writes every `batch` companies (a full rewrite per company was O(n²))."""
     u = storage.read("universe_us")
     ciks = dict(zip(u["symbol"], u["cik"], strict=True))
-    symbols = symbols or sorted(ciks)
+    have = storage.read("fundamentals_us")
+    done = set(have["symbol"]) if not have.empty else set()
+    todo = [s for s in (symbols or sorted(ciks)) if s in ciks and s not in done]
+    key = ["symbol", "metric", "tag", "unit", "period_end", "accession", "period_start"]
     sc = others.sec_client()
-    n = 0
+    n, buf = len(have), []
     try:
-        for s in symbols:
-            if s not in ciks:
-                continue
+        for i, s in enumerate(todo, 1):
             try:
-                f = others.sec_facts(sc, int(ciks[s]), s)
+                buf.append(others.sec_facts(sc, int(ciks[s]), s))
             except SourceError as e:
                 log.warning("sec %s: %s", s, e)
-                continue
-            n = storage.upsert(
-                "fundamentals_us",
-                f,
-                ["symbol", "metric", "tag", "unit", "period_end", "accession", "period_start"],
-            )
+            if buf and (i % batch == 0 or i == len(todo)):
+                n = storage.upsert("fundamentals_us", pd.concat(buf, ignore_index=True), key)
+                buf = []
+                log.info("fundamentals: %d/%d companies", i, len(todo))
     finally:
         sc.close()
+        if buf:
+            n = storage.upsert("fundamentals_us", pd.concat(buf, ignore_index=True), key)
     return n

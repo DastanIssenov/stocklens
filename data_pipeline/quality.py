@@ -113,7 +113,7 @@ def build_report() -> str:
             )
     if not kz.empty:
         cov = coverage(kz)
-        liq = cleaning.illiquidity(kz)
+        liq = cleaning.illiquidity(kz).rename(columns={"rows": "rows_last_63"})
         parts += [
             "## Kazakhstan prices (KASE via Tradernet, LSE GDRs via Yahoo)\n",
             _md(cov.merge(liq, on="symbol", how="left")),

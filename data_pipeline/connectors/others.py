@@ -89,35 +89,38 @@ def yahoo_bars(symbols: list[str], start: dt.date) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------ FRED / ALFRED
+REVISED_SERIES = {"CPIAUCSL", "UNRATE"}  # revised after publication → use first-release vintages (ALFRED)
+
+
 def fred_series(c: Polite, series_id: str, start: dt.date) -> pd.DataFrame:
+    """Daily market series are never revised: plain observations, available the next day (FRED publishes
+    with ≥ 1 business day delay). Revised macro series: first-release values with their real publication date."""
     if not SECRETS.fred_key:
         raise SourceError("FRED_KEY missing")
-    r = c.get(
-        "https://api.stlouisfed.org/fred/series/observations",
-        {
-            "series_id": series_id,
-            "api_key": SECRETS.fred_key,
-            "file_type": "json",
-            "observation_start": start.isoformat(),
-            # first-release vintages: realtime_start = when the value was first published (point-in-time)
-            "realtime_start": start.isoformat(),
-            "realtime_end": "9999-12-31",
-            "output_type": 4,
-        },
-    )
+    params: dict[str, Any] = {
+        "series_id": series_id,
+        "api_key": SECRETS.fred_key,
+        "file_type": "json",
+        "observation_start": start.isoformat(),
+    }
+    vintage = series_id in REVISED_SERIES
+    if vintage:
+        params.update({"realtime_start": start.isoformat(), "realtime_end": "9999-12-31", "output_type": 4})
+    r = c.get("https://api.stlouisfed.org/fred/series/observations", params)
     if r.status_code != 200:
-        raise SourceError(f"fred {series_id} HTTP {r.status_code}")
-    obs = r.json().get("observations", [])
-    df = pd.DataFrame(obs)
+        raise SourceError(f"fred {series_id} HTTP {r.status_code}")  # never echo the URL: it holds the key
+    df = pd.DataFrame(r.json().get("observations", []))
     if df.empty:
         return df
     df = df[df["value"] != "."]
+    date = pd.to_datetime(df["date"])
+    available = pd.to_datetime(df["realtime_start"]) if vintage else date + pd.Timedelta(days=1)
     return pd.DataFrame(
         {
             "series_id": series_id,
             "name": MACRO_SERIES.get(series_id, series_id),
-            "date": pd.to_datetime(df["date"]).dt.date,
-            "available_at": pd.to_datetime(df["realtime_start"]).dt.date,
+            "date": date.dt.date,
+            "available_at": available.dt.date,
             "value": df["value"].astype(float),
         }
     )

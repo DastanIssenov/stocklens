@@ -44,6 +44,19 @@ make dev-backend   # uvicorn --reload on :8000 (set DATABASE_URL / REDIS_URL)
 make dev-frontend  # next dev on :3000, proxies /api to :8000
 ```
 
+## Research workspace (data pipeline + models, CPU)
+
+```bash
+uv sync                                                   # root pyproject: data_pipeline/ + ml/ (macOS: brew install libomp)
+uv run python -m data_pipeline universe                   # top-100 liquid US companies (Alpaca + SEC)
+uv run python -m data_pipeline backfill --start 2016-01-01 --yahoo-before 2010-01-01   # Parquet lake in data/lake
+uv run python -m data_pipeline report                     # → docs/DATA_REPORT.md
+uv run python -m ml.train --config ml/configs/short_gbm.yaml --dry-run   # synthetic data, < 30 s
+uv run python -m ml.train --config ml/configs/short_gbm.yaml             # walk-forward, MLflow in mlruns/
+uv run python -m ml.serving.batch_predict --database-url postgresql://stock:stock@localhost:5433/stock
+uv run pytest                                             # pipeline + ML tests (incl. no-look-ahead test)
+```
+
 ## Documentation
 
 - [`docs/PROGRESS.md`](docs/PROGRESS.md) — what is done, verified, left

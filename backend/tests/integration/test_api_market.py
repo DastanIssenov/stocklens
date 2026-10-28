@@ -164,3 +164,31 @@ async def test_predictions_are_demo_and_cached(client, session) -> None:  # type
     empty = await make_ticker(session, "NEW")
     body = (await client.get(f"/api/v1/predictions/{empty.symbol}")).json()
     assert body["short_term"] == [] and body["is_demo"] is True
+
+
+async def test_trained_model_rows_win_and_mock_fills_gaps(client, session) -> None:  # type: ignore[no-untyped-def]
+    from app.db.models import Prediction
+
+    t = await make_ticker(session, "AMD")
+    rows = await make_prices(session, t, days=80)
+    session.add(
+        Prediction(
+            ticker_id=t.id,
+            model_version="lgbm-cpu-abc",
+            horizon="5d",
+            horizon_days=5,
+            as_of_date=rows[-1].date,
+            predicted_return=0.01,
+            prob_up=0.6,
+            confidence=0.2,
+            top_features=[{"name": "ret_5", "value": 0.01, "contribution": 0.02}],
+            is_demo=True,
+        )
+    )
+    await session.commit()
+    body = (await client.get("/api/v1/predictions/AMD")).json()
+    five = next(p for p in body["short_term"] if p["horizon"] == "5d")
+    assert five["model_version"] == "lgbm-cpu-abc" and five["prob_up"] == 0.6
+    one = next(p for p in body["short_term"] if p["horizon"] == "1d")
+    assert one["model_version"].startswith("mock")
+    assert len(body["long_term"]) == 4

@@ -16,6 +16,7 @@ dependencies = [
     "lightgbm>=4.7",
     "xgboost>=3.4",
     "mlflow>=3.17",
+    "psycopg[binary]>=3.2",
 ]
 
 [dependency-groups]
