@@ -18,9 +18,9 @@
 - [x] 1.4 Tickers, prices, news, FX, market overview endpoints + Redis cache + rate limiting
 - [x] 1.5 ML interface: mock prediction provider, mock + OpenAI-compatible trade reviewer
 - [x] 1.6 Paper trading (USD/KZT cash, fees, P&L, history) + trade reviews
-- [ ] 1.7 Data connectors (Alpaca, Tradernet, yfinance, Finnhub, RSS, NBK) + Celery/Beat tasks + seed command
-- [ ] 1.8 WebSocket `/ws/prices` via Redis pub/sub
-- [ ] 1.9 Backend tests ≥ 70 % coverage
+- [x] 1.7 Data connectors (Alpaca, Tradernet, yfinance, Finnhub, RSS, NBK) + Celery/Beat tasks + seed command
+- [x] 1.8 WebSocket `/ws/prices` via Redis pub/sub
+- [x] 1.9 Backend tests ≥ 70 % coverage
 - [ ] 1.10 Frontend: Next.js pages, charts, i18n (EN/RU/KK), disclaimer, demo badge, responsive
 - [ ] 1.11 Infra: docker-compose (db, redis, backend, worker, beat, frontend, nginx), Makefile, GitHub Actions CI
 - [ ] 1.12 End-to-end check: `make up` + `make seed` from scratch, register, browse, trade, review
@@ -45,3 +45,9 @@
 - **Done:** FastAPI app (config, structlog, `/health`), SQLAlchemy models + Alembic migration `0001` (Timescale hypertable `prices_daily`, pgvector `news.embedding vector(1024)`), JWT auth with argon2id, tickers/search, prices + latest quote, market overview, FX, news (vendor tags + RU/KK/EN alias linking, issuer-level sharing), predictions (mock provider, stored per as-of date), paper trading (USD/KZT cash, per-exchange fees, average cost, realised P&L), trade reviews (mock rule-based + OpenAI-compatible LLM with strict JSON + fallback), Redis cache + fixed-window rate limits, WebSocket hub.
 - **Verified:** `alembic upgrade/downgrade` round-trip and `alembic check` (models == migration); ruff + mypy clean; 40 tests pass against real Timescale + Redis containers (`infra/docker-compose.test.yml`), coverage 92 %.
 - **Left:** data connectors + Celery/Beat + seed; WebSocket tests; frontend; infra; GPU plan.
+
+### 2026-10-28 — Data connectors, Celery, seed (commit `deee196`)
+- **Done:** connectors for Alpaca (bars/snapshots/news), Tradernet (KASE), yfinance (LSE GDRs, KZT=X, Brent), Finnhub news, RSS (US + KZ ru/kk), NBK official rate; idempotent ingest service; live quotes → Redis + pub/sub → WebSocket; Celery app + Beat schedule; `python -m app.cli seed|universe|update-prices|update-news|update-fx|predict|quotes`.
+- **Verified with real sources** (dev DB): seed loaded 39 listings, 12.5 k US/LSE price rows + 7.5 k KASE rows (2 years), 7 NBK rates, 518 KZT=X and 504 Brent rows, 755 news items, demo predictions for every ticker with prices. Tests: 68 pass, coverage 95 %.
+- **Problems found & fixed:** Tradernet 403 for UAs containing a URL (D-019); Tradernet timestamps are Moscow midnight (fixed in DATA_SOURCES); `FOR UPDATE` on an outer join (locked only `positions`).
+- **Left:** frontend, Docker/infra/CI, end-to-end check, GPU plan.

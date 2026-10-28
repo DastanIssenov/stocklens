@@ -62,3 +62,26 @@ Newest decisions are appended at the bottom.
 ### D-018 — Seed universe
 - **Decision:** 20 liquid US names (`AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO JPM V MA LLY UNH XOM WMT JNJ PG HD COST NFLX`) + all KZ listings verified in DATA_SOURCES §5 (10 KASE Index shares, 4 extra KASE shares flagged illiquid, KSPI and FRHC on NASDAQ, KAP.IL, HSBK.IL, AIRA.IL). AIX is in the schema but has no data source yet.
 - **Why:** TASK.md asks for ~20 US tickers and all available KZ tickers.
+
+## Phase 1 — backend
+
+### D-019 — Plain bot User-Agent for all connectors
+- **Decision:** `User-Agent: stock-platform-capstone/0.1` (honest bot identifier, no browser impersonation). SEC requests use `SEC_USER_AGENT` from `.env` as SEC requires.
+- **Why:** verified that Tradernet answers **HTTP 403** when the UA contains a URL (`... +https://github.com/`), while a plain identifier is accepted. AIX blocks automated clients (Cloudflare) — we do not try to work around that.
+
+### D-020 — Paper-trading rules
+- **Decision:** market orders only, filled at the latest known price (live Alpaca IEX quote if fresh, else last daily close); whole shares; each trade settles in the listing currency (USD or KZT cash — no automatic FX); commission `max(min, rate × notional)`: US 0.05 % (min $1), KASE/AIX 0.15 % (min ₸300), LSE 0.1 % (min $3); buy commission goes into the cost basis; average-cost accounting; realised P&L = (price − avg cost) × qty − sell commission. Starting balance $100 000 + ₸50 000 000. Portfolio totals use the NBK official USD/KZT rate.
+- **Why:** simple, explainable, close to what Kazakh retail brokers (Freedom, Halyk) charge; separate currency wallets avoid hidden FX conversions.
+- **Alternatives:** limit orders / fractional shares (more UI and edge cases, little teaching value for now).
+
+### D-021 — `close` = split-adjusted, `adj_close` = split + dividend adjusted
+- **Decision:** charts and trading use `close` (split-adjusted, no dividend adjustment); models will use `adj_close` for returns. Tradernet has no dividend-adjusted series → `adj_close` is NULL for KASE; the GPU-phase pipeline will compute it from KASE dividend announcements (GPU_PLAN §2).
+- **Why:** charts must not jump on splits, but past prices should look like what traders actually saw.
+
+### D-022 — Today's KASE bar is provisional
+- **Decision:** Tradernet returns a bar for the current day during the session; we store it and overwrite it on every 2-hourly update (upsert on `(ticker_id, date)`).
+- **Why:** shows a near-live KZ price on the site. Models (GPU phase) must only use bars dated before the prediction date (look-ahead rule in GPU_PLAN §2).
+
+### D-023 — Mock prediction text: EN and RU; KK falls back to RU
+- **Decision:** rule-based review texts exist in English and Russian; Kazakh-locale users get Russian review text until a translation is added (the UI itself has KK strings).
+- **Why:** time; Russian is understood by most KZ users. The LLM reviewer already answers in Kazakh when asked.
