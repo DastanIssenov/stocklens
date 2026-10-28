@@ -21,9 +21,9 @@
 - [x] 1.7 Data connectors (Alpaca, Tradernet, yfinance, Finnhub, RSS, NBK) + Celery/Beat tasks + seed command
 - [x] 1.8 WebSocket `/ws/prices` via Redis pub/sub
 - [x] 1.9 Backend tests ≥ 70 % coverage
-- [ ] 1.10 Frontend: Next.js pages, charts, i18n (EN/RU/KK), disclaimer, demo badge, responsive
-- [ ] 1.11 Infra: docker-compose (db, redis, backend, worker, beat, frontend, nginx), Makefile, GitHub Actions CI
-- [ ] 1.12 End-to-end check: `make up` + `make seed` from scratch, register, browse, trade, review
+- [x] 1.10 Frontend: Next.js pages, charts, i18n (EN/RU/KK), disclaimer, demo badge, responsive
+- [x] 1.11 Infra: docker-compose (db, redis, backend, worker, beat, frontend, nginx), Makefile, GitHub Actions CI
+- [x] 1.12 End-to-end check: `make up` + `make seed` from scratch, register, browse, trade, review
 
 ### Phase 2 — GPU plan
 - [ ] 2.1 `docs/GPU_PLAN.md` complete (environment, pipeline, features, models, VRAM budget, backtest, MLflow, integration, checklist, cloud fallback)
@@ -51,3 +51,14 @@
 - **Verified with real sources** (dev DB): seed loaded 39 listings, 12.5 k US/LSE price rows + 7.5 k KASE rows (2 years), 7 NBK rates, 518 KZT=X and 504 Brent rows, 755 news items, demo predictions for every ticker with prices. Tests: 68 pass, coverage 95 %.
 - **Problems found & fixed:** Tradernet 403 for UAs containing a URL (D-019); Tradernet timestamps are Moscow midnight (fixed in DATA_SOURCES); `FOR UPDATE` on an outer join (locked only `positions`).
 - **Left:** frontend, Docker/infra/CI, end-to-end check, GPU plan.
+
+### 2026-10-28 — Frontend (commit `45232ab`)
+- **Done:** Next.js 16 app: market overview (US/KZ switch, FX, Brent, movers, sparkline table, news), ticker page (candlestick + volume chart with ranges, live price over WebSocket, demo predictions for 1d/5d/1m/3m/6m/12m with P(up)/confidence/top factors, news, trade form, other listings), trade page, portfolio (USD/KZT view), trade history with expandable AI reviews and re-run, "How the models work", login/register. EN/RU/KK UI. Disclaimer on every page with predictions/reviews; "Demo predictions" badge.
+- **Verified in the browser:** all pages with real seeded data, register → buy 300 KZAP.KZ → rule-based review (Reasonable 8/10) → portfolio math (fee in cost basis, P&L at NBK rate) → history; RU locale; 375 px phone layout without horizontal scroll. eslint, tsc, prettier, `next build` clean.
+
+### 2026-10-28 — Infra + end-to-end (commit `ba43cda`)
+- **Done:** Dockerfiles (backend uv-based, frontend standalone), `infra/docker-compose.yml` (db, redis, backend, worker, beat, frontend, nginx), nginx single origin incl. WebSocket, `Makefile`, GitHub Actions CI, `.env.example`, root README, `data_pipeline/` and `ml/` skeletons.
+- **Verified from scratch:** `make up` → all 7 containers healthy in ~3 min; `make seed` → 39 listings, 19 427 daily bars, 7 NBK rates, 518 KZT=X, 504 Brent, 770 news, demo predictions for 39 tickers, **0 errors**, 29 s. Through nginx: `/health`, all pages 200, register → trade (20 000 HSBK.KZ) → Russian-language review, portfolio; WebSocket push via nginx; every Celery task executed inside the worker (prices, FX/Brent, news, predictions, 22 live US quotes). `make test`: 70 backend tests (coverage 95.5 %) + frontend checks pass.
+- **Not verified:** GitHub Actions itself (repo is not pushed — TASK §0.4 says do not push). The CI steps were run locally with the same commands. See BLOCKERS #5.
+
+**Phase 1 Definition of Done: met** (except the remote CI run, which needs a push).
