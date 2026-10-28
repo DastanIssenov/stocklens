@@ -1,0 +1,43 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Data / models / ML artifacts (never commit large files)
+data/raw/
+data/processed/
+*.parquet
+*.pt
+*.safetensors
+*.gguf
+mlruns/
+mlartifacts/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.log
+.venv-research/
