@@ -42,3 +42,5 @@ mlartifacts/
 *.log
 .venv-research/
 .claude/
+data/
+ml/artifacts/

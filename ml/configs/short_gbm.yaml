@@ -1,0 +1,27 @@
+# Short-term (5-day direction) model on CPU. Run: python -m ml.train --config ml/configs/short_gbm.yaml
+name: short_gbm_cpu
+horizon: 5                 # trading days; target = up_5 (fwd 5-day log return > 0)
+data:
+  lake: data/lake          # Parquet lake from `python -m data_pipeline backfill`
+  prices: prices_us
+  start: "2010-01-01"
+  min_history_days: 252
+validation:
+  test_years: [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+  embargo_days: 5          # extra gap after purging horizon days
+models:
+  baseline_persistence: {}
+  baseline_momentum: {}
+  logreg: {C: 0.1}
+  lightgbm: {n_estimators: 400, learning_rate: 0.03, num_leaves: 31, min_child_samples: 200}
+  xgboost: {n_estimators: 400, learning_rate: 0.03, max_depth: 5, min_child_weight: 50}
+backtest:
+  top_quantile: 0.1
+  rebalance_days: 5
+  cost_bps: 10
+mlflow:
+  tracking_uri: sqlite:///mlruns/mlflow.db
+  experiment: short_term_gbm
+export:
+  model: lightgbm          # which model to export for the website after training
+  dir: ml/artifacts/short_gbm
