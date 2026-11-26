@@ -1,7 +1,8 @@
 """CLI: python -m data_pipeline <command>.
 
 universe                         build the top-100 US universe (Alpaca + SEC)
-backfill [--what ...] [--start]  historical load into data/lake (prices_us, prices_kz, market, macro, nbk, fundamentals)
+backfill [--what ...] [--start]  historical load into data/lake (prices_us, prices_kz, market, macro, nbk,
+                                 fundamentals, sectors)
 daily                            small daily refresh of everything (last 14 days)
 report                           write docs/DATA_REPORT.md
 """
@@ -15,7 +16,7 @@ import time
 
 from data_pipeline import jobs, quality, storage
 
-ALL = ["prices_us", "prices_kz", "market", "macro", "nbk", "fundamentals"]
+ALL = ["prices_us", "prices_kz", "market", "macro", "nbk", "fundamentals", "sectors"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
                 n = jobs.backfill_macro(dt.date(2005, 1, 1))
             elif what == "nbk":
                 n = jobs.backfill_nbk(a.nbk_start or dt.date.today() - dt.timedelta(days=60))
+            elif what == "sectors":
+                n = jobs.backfill_sectors()
             else:
                 n = jobs.backfill_fundamentals()
             print(f"{what}: {n:,} rows ({time.time() - t:.0f}s)")

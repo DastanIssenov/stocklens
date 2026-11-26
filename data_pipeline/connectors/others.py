@@ -160,6 +160,73 @@ def sec_acceptance_times(c: Polite, cik: int) -> dict[str, str]:
     return dict(zip(recent["accessionNumber"], recent["acceptanceDateTime"], strict=False))
 
 
+def sec_company(c: Polite, cik: int) -> dict[str, Any]:
+    """SIC industry code and name from the submissions endpoint (current value; SIC codes rarely change)."""
+    r = c.get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json")
+    if r.status_code != 200:
+        raise SourceError(f"sec submissions CIK {cik} HTTP {r.status_code}")
+    j = r.json()
+    sic = j.get("sic")
+    return {"sic": int(sic) if sic else None, "sic_description": j.get("sicDescription") or None}
+
+
+# Fama–French 12-industry grouping of SIC codes (French's Data Library definition); everything else → "Other"
+_FF12: list[tuple[str, list[tuple[int, int]]]] = [
+    ("NoDur", [(100, 999), (2000, 2399), (2700, 2749), (2770, 2799), (3100, 3199), (3940, 3989)]),
+    (
+        "Durbl",
+        [
+            (2500, 2519),
+            (2590, 2599),
+            (3630, 3659),
+            (3710, 3711),
+            (3714, 3714),
+            (3716, 3716),
+            (3750, 3751),
+            (3792, 3792),
+            (3900, 3939),
+            (3990, 3999),
+        ],
+    ),
+    (
+        "Manuf",
+        [
+            (2520, 2589),
+            (2600, 2699),
+            (2750, 2769),
+            (3000, 3099),
+            (3200, 3569),
+            (3580, 3629),
+            (3700, 3709),
+            (3712, 3713),
+            (3715, 3715),
+            (3717, 3749),
+            (3752, 3791),
+            (3793, 3799),
+            (3830, 3839),
+            (3860, 3899),
+        ],
+    ),
+    ("Enrgy", [(1200, 1399), (2900, 2999)]),
+    ("Chems", [(2800, 2829), (2840, 2899)]),
+    ("BusEq", [(3570, 3579), (3660, 3692), (3694, 3699), (3810, 3829), (7370, 7379)]),
+    ("Telcm", [(4800, 4899)]),
+    ("Utils", [(4900, 4949)]),
+    ("Shops", [(5000, 5999), (7200, 7299), (7600, 7699)]),
+    ("Hlth", [(2830, 2839), (3693, 3693), (3840, 3859), (8000, 8099)]),
+    ("Money", [(6000, 6999)]),
+]
+
+
+def ff12(sic: int | None) -> str:
+    if sic is None:
+        return "Other"
+    for name, ranges in _FF12:
+        if any(lo <= sic <= hi for lo, hi in ranges):
+            return name
+    return "Other"
+
+
 def sec_facts(c: Polite, cik: int, symbol: str) -> pd.DataFrame:
     r = c.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json")
     if r.status_code != 200:

@@ -185,3 +185,21 @@ def backfill_fundamentals(symbols: list[str] | None = None, batch: int = 10) -> 
         if buf:
             n = storage.upsert("fundamentals_us", pd.concat(buf, ignore_index=True), key)
     return n
+
+
+def backfill_sectors() -> int:
+    """SEC SIC code per universe company → `sectors_us` (symbol, cik, sic, sic_description, sector = FF12)."""
+    u = storage.read("universe_us")
+    sc = others.sec_client()
+    rows = []
+    try:
+        for s, cik in zip(u["symbol"], u["cik"], strict=True):
+            try:
+                info = others.sec_company(sc, int(cik))
+            except SourceError as e:
+                log.warning("sec %s: %s", s, e)
+                info = {"sic": None, "sic_description": None}
+            rows.append({"symbol": s, "cik": int(cik), **info, "sector": others.ff12(info["sic"])})
+    finally:
+        sc.close()
+    return storage.upsert("sectors_us", pd.DataFrame(rows), ["symbol"])

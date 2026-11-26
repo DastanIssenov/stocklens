@@ -123,6 +123,22 @@ Newest decisions are appended at the bottom.
 - **Why:** a weak CPU baseline must not look like a validated model to users (TASK §6: never promise returns).
 - **How it reaches the site:** stored rows of a trained model win over mock rows for the same horizon; horizons without a trained model are filled by the mock provider (`services/predictions.py`).
 
-### D-031 — Postgres published on 127.0.0.1:5433 in docker-compose
-- **Decision:** `db` maps `127.0.0.1:${DB_PORT:-5433}:5432` so the research env can write batch predictions.
+### D-031 — Postgres published on 127.0.0.1:55433 in docker-compose
+- **Decision:** `db` maps `127.0.0.1:${DB_PORT:-55433}:5432` so the research env can write batch predictions (5433 was taken on the dev Mac).
 - **Why:** offline batch inference is the GPU-phase integration pattern (GPU_PLAN §8.2). Bound to localhost only.
+
+### D-032 — Short-term model v2: rank label, dev-fold selection, ensemble (2026-11-26)
+- **Decision:** the 5-day model predicts `xup_5` (stock beats the day's median 5-day return) instead of `up_5`; features = v1 + 12 within-day ranks − `hy_spread`; score = mean of LightGBM and XGBoost; strategy = top 10 % with a top-30 % hold band and a 3-day score EMA. Every choice was made on dev folds 2016–2018 (`ml/experiments/ablation.py`, `docs/ABLATION_DEV.md`); 2019–2026 was evaluated once.
+- **Why:** v1's top features were market-level, so it timed the market (it said "up" for 15 %–99.9 % of a year) and its accuracy was below "always up". A 50/50 cross-sectional label makes the model rank stocks, which is what the strategy and the website use. The hold band halves turnover, which ate v1's edge.
+- **Rejected on dev folds:** residual returns, SEC-filing / earnings-reaction features, macro changes, dropping macro levels or calendar, stronger regularisation (all lowered dev IC).
+- **Result:** IC 0.013 → 0.023 (t 4.2), Sharpe 0.92 → 1.38 vs benchmark 1.36; still not promoted (AUC 0.505 < 0.52; the 21-day momentum baseline does better on strategy metrics). See `docs/BACKTEST_REPORT.md`.
+
+### D-033 — `hy_spread` removed; website numbers come from out-of-sample calibration
+- **Decision:** drop `hy_spread` from model features. Bundles carry two monotone tables fitted on pooled out-of-sample predictions (20 equal-count bins + isotonic regression): score → P(up over the horizon) and score → expected return. `batch_predict` uses them for `prob_up` and `predicted_return`.
+- **Why:** FRED serves ICE BofA series only for the last 3 years, so `hy_spread` is empty before 2023-10 (79 % of rows). The model is trained on a ranking label, so its raw probability is not P(up); isotonic on raw rows pinned the tails at 0 / 1, binning first keeps the displayed P(up) at 51.8 %–55.2 %.
+
+### D-034 — SEC fundamentals and industry features: built, not used by the 5-day model
+- **Decision:** keep `FEATURE_GROUPS["fundamentals"]` (10 point-in-time ranks from `ml/features/fundamentals.py`) and `["industry"]` (SEC SIC → 9 groups, `data_pipeline backfill --what sectors`) in the code and tests, but the 5-day model stays v2 without them.
+- **Why:** on dev folds 2016–2018 every variant lowered IC (0.030 → 0.007 all fundamentals, 0.027 fast-changing only, 0.015 / 0.027 industry). Slow per-stock ratios let the trees memorise stock identity in a ~100-name universe. They are long-horizon signals → reuse them for the 1–12-month models. Test folds were not run (nothing selected). See `docs/ABLATION_DEV_V3.md`.
+- **Point-in-time rules:** TTM = last fiscal year + YTD − prior-year YTD, known from the filing's acceptance time (first session after it, same rule as D-033 filings); market cap = share count × close on the count date × total return since (adj_close ratio), so it needs no split table and does not change when history is re-adjusted.
+

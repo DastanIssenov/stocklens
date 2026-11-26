@@ -8,7 +8,7 @@ Promotion rule (§7): rows are written with `is_demo = false` only if the out-of
 (IC t-stat ≥ 2, AUC ≥ 0.52, strategy Sharpe > benchmark Sharpe). Otherwise they are stored as
 `is_demo = true` — the UI keeps its "Demo predictions" badge, but shows the model version.
 
-Usage:  python -m ml.serving.batch_predict --database-url postgresql://stock:stock@localhost:5433/stock
+Usage:  python -m ml.serving.batch_predict --database-url postgresql://stock:stock@localhost:55433/stock
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from ml.features import compute_features
-from ml.train import REPO
+from ml.train import REPO, load_lake
 
 BUNDLE = REPO / "ml" / "artifacts" / "short_gbm"
 
@@ -37,25 +37,60 @@ def promoted(meta: dict[str, Any]) -> bool:
     )
 
 
+def _interp(table: dict[str, list[float]] | None, x: np.ndarray) -> np.ndarray | None:
+    if not table:
+        return None
+    return np.interp(x, np.asarray(table["x"]), np.asarray(table["y"]))
+
+
+def model_version(meta: dict[str, Any]) -> str:
+    prefix = {"lightgbm": "lgbm", "xgboost": "xgb", "ensemble": "gbm-ens"}.get(meta.get("model", ""), "lgbm")
+    return f"{prefix}-cpu-{meta['run_id'][:8]}"
+
+
+def _score_members(bundle: Path, meta: dict[str, Any], X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Mean probability of the bundle's members and mean TreeSHAP contributions (log-odds, bias dropped)."""
+    import lightgbm as lgb
+
+    members = meta.get("members") or {"lightgbm": "model.txt"}  # v1 bundles: one LightGBM file
+    probs, contribs = [], []
+    for name, fname in members.items():
+        if name == "lightgbm":
+            booster = lgb.Booster(model_file=str(bundle / fname))
+            probs.append(booster.predict(X))
+            contribs.append(booster.predict(X, pred_contrib=True)[:, :-1])
+        elif name == "xgboost":
+            import xgboost as xgb
+
+            xb = xgb.Booster()
+            xb.load_model(str(bundle / fname))
+            dm = xgb.DMatrix(X)
+            probs.append(xb.predict(dm))
+            contribs.append(xb.predict(dm, pred_contribs=True)[:, :-1])
+    return np.mean(probs, axis=0), np.mean(contribs, axis=0)
+
+
 def predict_latest(
     bundle: Path = BUNDLE, lake: Path = REPO / "data" / "lake"
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    import lightgbm as lgb
-
     meta = json.loads((bundle / "meta.json").read_text())
-    booster = lgb.Booster(model_file=str(bundle / "model.txt"))
-    prices = pd.read_parquet(lake / "prices_us.parquet")
-    prices = prices[
+    data = load_lake({"data": {"prices": "prices_us", "start": "1900-01-01"}}, lake)
+    prices = data.prices
+    data.prices = prices[
         pd.to_datetime(prices["date"]) >= pd.to_datetime(prices["date"]).max() - pd.Timedelta(days=500)
     ]
-    market = pd.read_parquet(lake / "market_yahoo.parquet")
-    macro = pd.read_parquet(lake / "macro_fred.parquet") if (lake / "macro_fred.parquet").exists() else None
-    feats = compute_features(prices, market, macro)
+    feats = compute_features(
+        data.prices, data.market, data.macro, data.filings, data.fund_events, data.industries
+    )
     latest = feats[feats["date"] == feats.groupby("symbol")["date"].transform("max")].reset_index(drop=True)
     X = latest[meta["features"]]
-    p = booster.predict(X)
-    contrib = booster.predict(X, pred_contrib=True)[:, :-1]  # TreeSHAP, last column = bias
-    vol5 = latest["vol_21"].fillna(latest["vol_21"].median()) * math.sqrt(meta["horizon"])
+    score, contrib = _score_members(bundle, meta, X)
+    cal = meta.get("calibration", {})
+    # v2 bundles carry isotonic tables fitted on out-of-sample predictions; v1 used the raw probability
+    prob = _interp(cal.get("prob_up"), score)
+    prob = score if prob is None else prob
+    exp_ret = _interp(cal.get("expected_return"), score)
+    vol_h = latest["vol_21"].fillna(latest["vol_21"].median()) * math.sqrt(meta["horizon"])
     auc_edge = max(0.0, meta.get("oos_metrics", {}).get("auc", 0.5) - 0.5)
     rows = []
     for i, r in latest.iterrows():
@@ -64,10 +99,12 @@ def predict_latest(
             {
                 "symbol": r["symbol"],
                 "as_of_date": r["date"].date(),
-                "prob_up": float(p[i]),
-                # expected return proxy: direction edge × typical move over the horizon (documented, not a regression)
-                "predicted_return": float((2 * p[i] - 1) * vol5[i] * 0.8),
-                "confidence": float(min(1.0, abs(2 * p[i] - 1) * (0.5 + 10 * auc_edge))),
+                "prob_up": float(prob[i]),
+                # v2: isotonic E[return | score] from out-of-sample folds; v1: direction edge × typical move
+                "predicted_return": float(
+                    exp_ret[i] if exp_ret is not None else (2 * prob[i] - 1) * vol_h[i] * 0.8
+                ),
+                "confidence": float(min(1.0, abs(2 * prob[i] - 1) * (0.5 + 10 * auc_edge))),
                 "top_features": [
                     {
                         "name": meta["features"][j],
@@ -84,7 +121,7 @@ def predict_latest(
 def write(df: pd.DataFrame, meta: dict[str, Any], database_url: str) -> int:
     import psycopg
 
-    version = f"lgbm-cpu-{meta['run_id'][:8]}"
+    version = model_version(meta)
     is_demo = not promoted(meta)
     n = 0
     with (
@@ -129,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     df, meta = predict_latest(a.bundle)
     n = write(df, meta, a.database_url)
-    print(f"wrote {n} predictions (model lgbm-cpu-{meta['run_id'][:8]}, promoted={promoted(meta)})")
+    print(f"wrote {n} predictions (model {model_version(meta)}, promoted={promoted(meta)})")
     return 0
 
 

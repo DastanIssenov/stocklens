@@ -2,12 +2,13 @@
 
 **Read this first.** Updated after every finished task. Newest log entries at the bottom of the log.
 
-## Where things stand (end of the autonomous run, 2026-10-28)
-- **Phase 0, 1, 2: done.** All extras from TASK §5 done as well (pipeline, CPU baselines, `ml.train --dry-run`).
+## Where things stand (2026-11-26)
+- **Phase 0, 1, 2: done.** Extras done. **Short-term model v2 trained** (CPU): rank IC 0.023 (t 4.2), strategy Sharpe 1.38 vs benchmark 1.36 — still **not promoted** (D-030, D-032). Details: `docs/BACKTEST_REPORT.md`, `docs/ABLATION_DEV.md`.
 - **Run it:** `make up && make seed` → <http://localhost:8080> (API docs at `/docs`). `make test` runs every check.
-- **Predictions on the site:** 5-day horizon from the CPU LightGBM baseline (`lgbm-cpu-93314193`, run `uv run python -m ml.serving.batch_predict --database-url postgresql://stock:stock@localhost:55433/stock` after `make seed`); other horizons are mock. The "Demo predictions" badge stays on because the model failed the promotion rule (docs/BACKTEST_REPORT.md).
-- **Needs you:** push to GitHub to get the first CI run (BLOCKERS #5); decide on KASE data licensing before any public launch (BLOCKERS #2); optional `LLM_*` variables to switch the trade reviewer to a real LLM.
-- **Key docs:** DECISIONS (D-001…D-031), DATA_SOURCES, ARCHITECTURE, GPU_PLAN, DATA_REPORT, BACKTEST_REPORT, BLOCKERS.
+- **Predictions on the site:** all horizons are mock until a batch run writes model rows for the latest bar. To show v2's 5-day predictions: refresh the lake (`uv run python -m data_pipeline daily`), then `uv run python -m ml.serving.batch_predict --database-url postgresql://stock:stock@localhost:55433/stock` (rows `gbm-ens-cpu-32704ac5`, `is_demo = true`). A nightly job for this is not built yet.
+- **Decided 2026-11-26:** model first; the LLM part (news sentiment, LLM trade reviewer) is postponed. TASK.md still lists an LLM in the ensemble — build it later or cut it from scope in the write-up.
+- **Needs you:** push to GitHub for the first CI run (BLOCKERS #5); KASE data licensing before any public launch (BLOCKERS #2).
+- **Key docs:** DECISIONS (D-001…D-034), DATA_SOURCES, ARCHITECTURE, GPU_PLAN, DATA_REPORT, BACKTEST_REPORT, ABLATION_DEV (+ _V3), BLOCKERS.
 
 ## Phase checklist
 
@@ -82,3 +83,16 @@
 - **E.2 Features + baselines** (`ml/`): one feature module (44 features, macro joined on publication date), walk-forward with purge + embargo, persistence/momentum/logreg/LightGBM/XGBoost, metrics (AUC, IC, hit rate, Sharpe, Sortino, max DD, turnover), MLflow (`mlruns/mlflow.db`). Results in `docs/BACKTEST_REPORT.md`: LightGBM OOS AUC 0.516, IC 0.013 (t 2.8) — beats the baselines on IC but its strategy Sharpe (0.92) is below the equal-weight benchmark (1.36) → not promoted (D-030). Plugged into the website through batch inference (`ml/serving/batch_predict.py`) → 22 tickers show `lgbm-cpu-93314193` 5-day predictions with SHAP factors.
 - **E.3** `python -m ml.train --config ml/configs/short_gbm.yaml --dry-run` runs on synthetic data in ≈ 12 s. Research tests: 9 pass (incl. the no-look-ahead test).
 - **Problems found & fixed:** httpx logged full URLs (FRED key is a query parameter) → silenced; FRED vintage mode returned no data for daily series → vintages only for revised series; NBK connection error stopped the backfill → per-day error handling; fundamentals O(n²) rewrites hit the time limit → batched + resumable; port 5433 already in use on this Mac → Postgres mapped to 127.0.0.1:55433 (site was briefly down, restored and re-verified); LightGBM needs `brew install libomp` on macOS (installed).
+
+### 2026-11-26 — Short-term model v2 (CPU) + nginx fix
+- **Done:** nginx resolves `backend`/`frontend` per request via Docker DNS (a recreated frontend left nginx on a dead IP → 502). ML: excess-return label `xup_h`, 12 rank features, filing (10-Q/10-K timing) and macro-change features, LightGBM+XGBoost ensemble, hold-band + score-EMA portfolio rule, accuracy/precision/recall in the metrics, dev-fold ablation script, ensemble export with out-of-sample calibration, batch inference for v1 and v2 bundles.
+- **Verified:** ablation on dev folds 2016–2018 only, then one test run 2019–2026 (MLflow `32704ac5…`, reproduced exactly by a second run); `pytest ml` 10 passed (no-look-ahead test now covers filing and macro features with future filings passed in); `batch_predict.predict_latest()` scores 102 tickers with the v2 bundle (not written to the DB).
+- **Found:** `hy_spread` exists only from 2023-10 (FRED/ICE licensing) → dropped (D-033). v1 accuracy (52.5 %) was below "always up" (54.6 %). The 21-day momentum baseline beats every model on strategy metrics — most likely survivorship bias of today's-liquid universe.
+- **Left:** point-in-time universe, beta-neutral label (choose on dev folds), long-horizon ranking models (1–12 m are still mock), nightly batch inference / `MLflowPredictionProvider`.
+
+### 2026-11-26 — New data for the model: SEC fundamentals + industries (not adopted)
+- **Done:** `data_pipeline backfill --what sectors` (SEC SIC for 102 companies, FF12 + tech split into Software / Semis / Hardware); point-in-time fundamentals (`ml/features/fundamentals.py`: TTM from 10-K/10-Q facts incl. comparatives, split-proof market cap) → 10 ranked ratios; industry-relative returns; stage-2 ablation `python -m ml.experiments.ablation_v3`.
+- **Verified:** `pytest ml` 11 passed — no-look-ahead test now covers fundamentals (future filings passed in) and industries; TTM unit test; AAPL FY2025 revenue 416 B / net income 112 B match the 10-K; `pytest data_pipeline` 4 passed.
+- **Result:** all variants lower the dev IC → v2 unchanged, test folds not run (D-034, `docs/ABLATION_DEV_V3.md`). Gaps: no E/P for ASML, TSM, NU, KSPI, V, XOM, CBRS, SKHY, SPCX.
+- **Left:** use the fundamentals in the long-horizon (1–12 m) models; KZ lead–lag model; news counts (Alpaca news history not downloaded yet).
+

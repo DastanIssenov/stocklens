@@ -11,16 +11,27 @@ import json
 import logging
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import yaml
+from sklearn.metrics import roc_auc_score
 
 from ml.backtest.metrics import long_top_quantile, prediction_metrics
-from ml.datasets.walkforward import split, yearly_folds
-from ml.features import FEATURES, add_targets, compute_features
+from ml.datasets.walkforward import Fold, split, yearly_folds
+from ml.features import (
+    CALENDAR,
+    FEATURE_GROUPS,
+    FEATURES_V1,
+    MACRO_LEVELS,
+    add_targets,
+    compute_features,
+    filings_from_fundamentals,
+)
+from ml.features.fundamentals import fundamental_events, industry_groups
 from ml.models.zoo import build
 
 log = logging.getLogger("ml.train")
@@ -61,26 +72,128 @@ def synthetic_panel(
     return prices, pd.concat([spy, vix], ignore_index=True)
 
 
-def load_lake(cfg: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    lake = REPO / cfg["data"]["lake"]
+@dataclass
+class Lake:
+    prices: pd.DataFrame
+    market: pd.DataFrame | None = None
+    macro: pd.DataFrame | None = None
+    filings: pd.DataFrame | None = None
+    fund_events: pd.DataFrame | None = None
+    industries: pd.Series | None = None
+
+
+def load_lake(cfg: dict[str, Any], lake_dir: Path | None = None) -> Lake:
+    lake = lake_dir or REPO / cfg["data"]["lake"]
     prices = pd.read_parquet(lake / f"{cfg['data']['prices']}.parquet")
     prices = prices[pd.to_datetime(prices["date"]) >= pd.Timestamp(cfg["data"]["start"])]
-    market = (
-        pd.read_parquet(lake / "market_yahoo.parquet") if (lake / "market_yahoo.parquet").exists() else None
+
+    def opt(name: str) -> pd.DataFrame | None:
+        return pd.read_parquet(lake / name) if (lake / name).exists() else None
+
+    fund, sectors = opt("fundamentals_us.parquet"), opt("sectors_us.parquet")
+    return Lake(
+        prices=prices,
+        market=opt("market_yahoo.parquet"),
+        macro=opt("macro_fred.parquet"),
+        filings=filings_from_fundamentals(fund) if fund is not None else None,
+        fund_events=fundamental_events(fund) if fund is not None else None,
+        industries=industry_groups(sectors) if sectors is not None else None,
     )
-    macro = pd.read_parquet(lake / "macro_fred.parquet") if (lake / "macro_fred.parquet").exists() else None
-    return prices, market, macro
 
 
-def build_dataset(
-    prices: pd.DataFrame, market: pd.DataFrame | None, macro: pd.DataFrame | None, h: int, min_hist: int
-) -> pd.DataFrame:
-    feats = compute_features(prices, market, macro)
-    tgt = add_targets(prices, (1, h))
+def resolve_features(spec: Any) -> list[str]:
+    """`features:` in the config — "v1" (default), or {base: v1|none, add: [group…], drop: [group|name…]}.
+    Groups: FEATURE_GROUPS keys plus "macro_levels" and "calendar"."""
+    if spec is None or spec == "v1":
+        return list(FEATURES_V1)
+    groups = {**FEATURE_GROUPS, "macro_levels": MACRO_LEVELS, "calendar": CALENDAR}
+    out = list(FEATURES_V1) if spec.get("base", "v1") == "v1" else []
+    for g in spec.get("add", []):  # a group name or a single feature name
+        out += [f for f in groups.get(g, [g]) if f not in out]
+    drop = {f for g in spec.get("drop", []) for f in groups.get(g, [g])}
+    return [f for f in out if f not in drop]
+
+
+def build_dataset(lake: Lake, h: int, min_hist: int) -> pd.DataFrame:
+    feats = compute_features(
+        lake.prices, lake.market, lake.macro, lake.filings, lake.fund_events, lake.industries
+    )
+    tgt = add_targets(lake.prices, tuple(sorted({1, h})))
     df = feats.merge(tgt, on=["symbol", "date"])
     df["n_hist"] = df.groupby("symbol").cumcount()
     df = df[df["n_hist"] >= min_hist].drop(columns="n_hist")
     return df.dropna(subset=[f"up_{h}"])
+
+
+def walk_forward(
+    df: pd.DataFrame,
+    features: list[str],
+    label: str,
+    h: int,
+    model_cfg: dict[str, Any],
+    folds: list[Fold],
+    ensemble: list[str] | None = None,
+    on_fold: Any = None,
+) -> tuple[dict[str, pd.DataFrame], list[pd.Series]]:
+    """Fit every model on each fold's training window, score the test window. Returns pooled out-of-sample
+    predictions per model (plus "ensemble" = mean probability of the listed members) and LightGBM importances."""
+    keep = ["symbol", "date", f"up_{h}", f"xup_{h}", f"fwd_ret_{h}", "fwd_ret_1"]
+    oos: dict[str, list[pd.DataFrame]] = {m: [] for m in model_cfg}
+    importances: list[pd.Series] = []
+    for fold in folds:
+        train, test = split(df, fold)
+        train = train.dropna(subset=[label])
+        Xtr, ytr = train[features], train[label]
+        fold_scores: dict[str, np.ndarray] = {}
+        for name, params in model_cfg.items():
+            model = build(name, params).fit(Xtr, ytr)
+            pred = test[keep].copy()
+            pred["score"] = model.score(test[features])
+            fold_scores[name] = pred["score"].to_numpy()
+            oos[name].append(pred)
+            if name == "lightgbm":
+                importances.append(model.importance(features))  # type: ignore[attr-defined]
+        if ensemble:
+            pred = test[keep].copy()
+            pred["score"] = np.mean([fold_scores[m] for m in ensemble], axis=0)
+            oos.setdefault("ensemble", []).append(pred)
+        if on_fold:
+            on_fold(fold, {n: parts[-1] for n, parts in oos.items()})
+        log.info(
+            "fold %s done (train ≤ %s, test %s–%s)",
+            fold.name,
+            fold.train_end.date(),
+            fold.test_start.date(),
+            fold.test_end.date(),
+        )
+    return {n: pd.concat(p, ignore_index=True) for n, p in oos.items()}, importances
+
+
+def evaluate(pred: pd.DataFrame, label: str, h: int, bt: dict[str, Any] | None = None) -> dict[str, float]:
+    """Prediction metrics + (optionally) the long-only top-quantile backtest.
+    auc     = AUC vs the ABSOLUTE label up_h (stock went up) — the number the promotion rule uses;
+    auc_rel = AUC vs xup_h (stock beat the day's median); logloss / hit_rate are vs the training label;
+    IC is the same for absolute and excess returns (ranks within a day do not change)."""
+    m = prediction_metrics(pred, "score", label, f"fwd_ret_{h}")
+    d = pred.dropna(subset=["score"])
+    for key, col in (("auc", f"up_{h}"), ("auc_rel", f"xup_{h}")):
+        dd = d.dropna(subset=[col])
+        if dd[col].nunique() == 2:
+            m[key] = float(roc_auc_score(dd[col], dd["score"]))
+    if bt:
+        m.update(
+            long_top_quantile(
+                pred,
+                "score",
+                "fwd_ret_1",
+                bt["top_quantile"],
+                bt["rebalance_days"],
+                bt["cost_bps"],
+                hold=bt.get("hold_quantile"),
+                smooth=int(bt.get("smooth_span", 1)),
+            )
+        )
+    return m
 
 
 def run(cfg: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
@@ -88,10 +201,11 @@ def run(cfg: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
 
     t0 = time.time()
     h = int(cfg["horizon"])
-    target_up, target_ret = f"up_{h}", f"fwd_ret_{h}"
+    label = f"{cfg.get('target', 'up')}_{h}"
+    features = resolve_features(cfg.get("features"))
     if dry_run:
         prices, market = synthetic_panel()
-        macro = None
+        lake = Lake(prices, market)
         test_years = [2023, 2024]
         min_hist = 120
         model_cfg = {
@@ -101,68 +215,53 @@ def run(cfg: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
         tmp = tempfile.mkdtemp(prefix="mlruns-dry-")
         tracking = f"sqlite:///{tmp}/mlflow.db"
     else:
-        prices, market, macro = load_lake(cfg)
+        lake = load_lake(cfg)
         test_years = cfg["validation"]["test_years"]
         min_hist = cfg["data"]["min_history_days"]
         model_cfg = cfg["models"]
         (REPO / "mlruns").mkdir(exist_ok=True)
         tracking = cfg["mlflow"]["tracking_uri"].replace("sqlite:///mlruns", f"sqlite:///{REPO}/mlruns")
-    df = build_dataset(prices, market, macro, h, min_hist)
+    df = build_dataset(lake, h, min_hist)
     log.info(
-        "dataset: %d rows, %d symbols, %s → %s",
+        "dataset: %d rows, %d symbols, %s → %s, %d features, label %s",
         len(df),
         df["symbol"].nunique(),
         df["date"].min().date(),
         df["date"].max().date(),
+        len(features),
+        label,
     )
 
     mlflow.set_tracking_uri(tracking)
     mlflow.set_experiment(cfg["mlflow"]["experiment"] + ("_dryrun" if dry_run else ""))
     folds = list(yearly_folds(df["date"], test_years, h, int(cfg["validation"]["embargo_days"])))
     results: dict[str, Any] = {}
-    oos: dict[str, list[pd.DataFrame]] = {m: [] for m in model_cfg}
-    importances: list[pd.Series] = []
     with mlflow.start_run(run_name=cfg["name"] + ("-dry" if dry_run else "")) as run:
         mlflow.log_params(
             {
                 "horizon": h,
+                "label": label,
                 "n_rows": len(df),
                 "n_symbols": df["symbol"].nunique(),
-                "n_features": len(FEATURES),
+                "n_features": len(features),
                 "folds": ",".join(f.name for f in folds),
                 "dry_run": dry_run,
             }
         )
         mlflow.log_dict(cfg, "config.yaml")
-        for fold in folds:
-            train, test = split(df, fold)
-            Xtr, ytr = train[FEATURES], train[target_up]
-            for name, params in model_cfg.items():
-                model = build(name, params).fit(Xtr, ytr)
-                pred = test[["symbol", "date", target_up, target_ret, "fwd_ret_1"]].copy()
-                pred["score"] = model.score(test[FEATURES])
-                oos[name].append(pred)
-                m = prediction_metrics(pred, "score", target_up, target_ret)
-                for k, v in m.items():
-                    mlflow.log_metric(f"{name}.{k}.{fold.name}", v)
-                if name == "lightgbm":
-                    importances.append(model.importance(FEATURES))
-            log.info(
-                "fold %s done (train ≤ %s, test %s–%s)",
-                fold.name,
-                fold.train_end.date(),
-                fold.test_start.date(),
-                fold.test_end.date(),
-            )
-        bt = cfg["backtest"]
-        for name, parts in oos.items():
-            allp = pd.concat(parts, ignore_index=True)
-            m = prediction_metrics(allp, "score", target_up, target_ret)
-            m.update(
-                long_top_quantile(
-                    allp, "score", "fwd_ret_1", bt["top_quantile"], bt["rebalance_days"], bt["cost_bps"]
-                )
-            )
+        mlflow.log_dict({"features": features}, "features.json")
+
+        def log_fold(fold: Fold, preds: dict[str, pd.DataFrame]) -> None:
+            for name, pred in preds.items():
+                for k, v in evaluate(pred, label, h).items():
+                    if np.isfinite(v):
+                        mlflow.log_metric(f"{name}.{k}.{fold.name}", v)
+
+        oos, importances = walk_forward(
+            df, features, label, h, model_cfg, folds, cfg.get("ensemble"), on_fold=log_fold
+        )
+        for name, allp in oos.items():
+            m = evaluate(allp, label, h, cfg["backtest"])
             results[name] = m
             mlflow.log_metrics({f"{name}.{k}": v for k, v in m.items() if np.isfinite(v)})
         if importances:
@@ -172,25 +271,68 @@ def run(cfg: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
         results["_run_id"] = run.info.run_id
         results["_seconds"] = round(time.time() - t0, 1)
         if not dry_run and cfg.get("export"):
-            export(cfg, df, model_cfg, run.info.run_id, results)
+            export(cfg, df, features, label, model_cfg, run.info.run_id, results, oos)
     return results
 
 
+def _isotonic_table(x: np.ndarray, y: np.ndarray, bins: int = 20) -> dict[str, list[float]]:
+    """Monotone map score → E[y | score] as an interpolation table. Scores are first grouped into equal-count
+    quantile bins (thousands of rows each) and isotonic regression runs on the bin means — fitting it on raw
+    rows lets a handful of extreme scores pin the tails at 0 / 1. Outside the table np.interp clamps."""
+    from sklearn.isotonic import IsotonicRegression
+
+    ok = np.isfinite(x) & np.isfinite(y)
+    xs, ys = x[ok], y[ok]
+    order = np.argsort(xs, kind="stable")
+    parts = np.array_split(order, bins)
+    bx = np.array([np.median(xs[p]) for p in parts])
+    by = np.array([ys[p].mean() for p in parts])
+    w = np.array([len(p) for p in parts], dtype=float)
+    fit = IsotonicRegression(out_of_bounds="clip").fit(bx, by, sample_weight=w).predict(bx)
+    return {"x": [float(v) for v in bx], "y": [float(v) for v in fit]}
+
+
 def export(
-    cfg: dict[str, Any], df: pd.DataFrame, model_cfg: dict[str, Any], run_id: str, results: dict[str, Any]
+    cfg: dict[str, Any],
+    df: pd.DataFrame,
+    features: list[str],
+    label: str,
+    model_cfg: dict[str, Any],
+    run_id: str,
+    results: dict[str, Any],
+    oos: dict[str, pd.DataFrame],
 ) -> None:
-    """Refit the chosen model on all data and save a bundle the batch-inference job can load."""
+    """Refit the chosen model (lightgbm, xgboost or the ensemble) on all data and save a bundle for batch
+    inference. Two calibration tables are fitted on the pooled OUT-OF-SAMPLE predictions: score → P(up over the
+    horizon) and score → expected return, so the website shows calibrated numbers whatever the training label."""
     name = cfg["export"]["model"]
+    h = int(cfg["horizon"])
+    members = list(cfg.get("ensemble") or []) if name == "ensemble" else [name]
     out = REPO / cfg["export"]["dir"]
     out.mkdir(parents=True, exist_ok=True)
-    model = build(name, model_cfg[name]).fit(df[FEATURES], df[f"up_{cfg['horizon']}"])
-    model.m.booster_.save_model(str(out / "model.txt"))
+    data = df.dropna(subset=[label])
+    files = {}
+    for mname in members:
+        model = build(mname, model_cfg[mname]).fit(data[features], data[label])
+        if mname == "lightgbm":
+            model.m.booster_.save_model(str(out / "model.txt"))  # type: ignore[attr-defined]
+            files["lightgbm"] = "model.txt"
+        elif mname == "xgboost":
+            model.m.get_booster().save_model(str(out / "xgb.json"))  # type: ignore[attr-defined]
+            files["xgboost"] = "xgb.json"
+    pred = oos[name].dropna(subset=["score"])
     meta = {
         "model": name,
-        "horizon": cfg["horizon"],
-        "features": FEATURES,
+        "members": files,
+        "horizon": h,
+        "label": label,
+        "features": features,
         "run_id": run_id,
         "trained_through": str(df["date"].max().date()),
+        "calibration": {
+            "prob_up": _isotonic_table(pred["score"].to_numpy(), pred[f"up_{h}"].to_numpy()),
+            "expected_return": _isotonic_table(pred["score"].to_numpy(), pred[f"fwd_ret_{h}"].to_numpy()),
+        },
         "oos_metrics": results.get(name, {}),
         "baseline_metrics": {k: results[k] for k in results if k.startswith("baseline")},
     }
@@ -212,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         c
         for c in (
             "auc",
+            "auc_rel",
             "ic_mean",
             "ic_tstat",
             "hit_rate",

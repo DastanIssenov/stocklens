@@ -13,7 +13,18 @@ def prediction_metrics(df: pd.DataFrame, score: str, target_up: str, target_ret:
     if d[target_up].nunique() == 2:
         out["auc"] = float(roc_auc_score(d[target_up], d[score]))
         out["logloss"] = float(log_loss(d[target_up], d[score].clip(1e-4, 1 - 1e-4)))
-    out["hit_rate"] = float(((d[score] > 0.5) == (d[target_up] > 0.5)).mean())
+    pred_up, true_up = d[score] > 0.5, d[target_up] > 0.5
+    out["hit_rate"] = float((pred_up == true_up).mean())  # = accuracy at the 0.5 threshold
+    out["base_rate"] = float(
+        true_up.mean()
+    )  # accuracy of "always predict up" = max(base_rate, 1 − base_rate)
+    tp = float((pred_up & true_up).sum())
+    out["pred_up_share"] = float(pred_up.mean())
+    out["precision_up"] = tp / pred_up.sum() if pred_up.sum() else float("nan")
+    out["recall_up"] = tp / true_up.sum() if true_up.sum() else float("nan")
+    tn = float((~pred_up & ~true_up).sum())
+    out["precision_down"] = tn / (~pred_up).sum() if (~pred_up).sum() else float("nan")
+    out["recall_down"] = tn / (~true_up).sum() if (~true_up).sum() else float("nan")
     ic = (
         d.groupby("date")
         .apply(
@@ -29,21 +40,51 @@ def prediction_metrics(df: pd.DataFrame, score: str, target_up: str, target_ret:
     return out
 
 
+def smooth_scores(df: pd.DataFrame, score: str, span: int) -> pd.Series:
+    """EMA of each symbol's score over its own past dates (span 1 = unchanged). Uses only today and earlier."""
+    if span <= 1:
+        return df[score]
+    d = df.sort_values("date")
+    sm = d.groupby("symbol")[score].transform(lambda s: s.ewm(span=span, adjust=False).mean())
+    return sm.reindex(df.index)
+
+
 def long_top_quantile(
-    df: pd.DataFrame, score: str, ret_1d: str, top: float = 0.1, rebalance: int = 5, cost_bps: float = 10.0
+    df: pd.DataFrame,
+    score: str,
+    ret_1d: str,
+    top: float = 0.1,
+    rebalance: int = 5,
+    cost_bps: float = 10.0,
+    hold: float | None = None,
+    smooth: int = 1,
 ) -> dict[str, float]:
     """Every `rebalance` days buy the top `top` share by score (equal weight), hold, pay costs on turnover.
-    Daily P&L uses next-day returns (`ret_1d` = forward 1-day log return), compared with equal-weight universe."""
-    d = df.dropna(subset=[score, ret_1d]).sort_values("date")
-    dates = sorted(d["date"].unique())
+    Daily P&L uses next-day returns (`ret_1d` = forward 1-day log return), compared with equal-weight universe.
+
+    hold:   hysteresis band — a name already held is kept while it ranks inside the top `hold` share
+            (hold > top), so names hovering around the cut-off do not churn. None = no band.
+    smooth: EMA span over each symbol's past scores before ranking (1 = off)."""
+    d = df.dropna(subset=[score, ret_1d]).copy()
+    d["_s"] = smooth_scores(d, score, smooth)
+    d = d.sort_values("date")
     holdings: set[str] = set()
     rows = []
-    for i, day in enumerate(dates):
-        g = d[d["date"] == day]
+    for i, (day, g) in enumerate(d.groupby("date", sort=True)):
         turnover = 0.0
         if i % rebalance == 0:
             k = max(1, int(len(g) * top))
-            new = set(g.nlargest(k, score)["symbol"])
+            ranked = g.sort_values("_s", ascending=False)["symbol"].tolist()
+            if hold is not None and holdings:
+                keep_k = max(k, int(len(g) * hold))
+                kept = [s for s in ranked[:keep_k] if s in holdings][:k]
+                new = set(kept)
+                for s in ranked:
+                    if len(new) >= k:
+                        break
+                    new.add(s)
+            else:
+                new = set(ranked[:k])
             if holdings or new:
                 turnover = len(new.symmetric_difference(holdings)) / max(len(new), 1)
             holdings = new
