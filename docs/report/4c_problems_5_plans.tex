@@ -1,0 +1,205 @@
+% ---------------------------------------------------------------------------
+% Team 38 Final Report -- Section 4c (Problems encountered) and Section 5
+% (Plans for Spring). Author: Dastan Issenov.
+%
+% Needs in the preamble:
+%   \usepackage{longtable}
+%   \usepackage{booktabs}
+%   \usepackage{array}
+% ---------------------------------------------------------------------------
+
+\subsection{Problems Encountered}
+\label{sec:problems}
+
+The three main problems were the lack of a GPU, a weak predictive signal and
+gaps in the data sources. Most of them were solved or worked around during the
+semester; the rest are scheduled for spring. Table~\ref{tab:problems} lists each
+problem, what happened and how it was solved or will be solved.
+
+{\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.17\linewidth}
+                    >{\raggedright\arraybackslash}p{0.38\linewidth}
+                    >{\raggedright\arraybackslash}p{0.38\linewidth}@{}}
+\caption{Problems encountered during the Fall 2026 semester.}
+\label{tab:problems}\\
+\toprule
+\textbf{Problem} & \textbf{What happened} & \textbf{How we solved it, or will solve it} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\emph{Table~\ref{tab:problems} continued}}\\
+\toprule
+\textbf{Problem} & \textbf{What happened} & \textbf{How we solved it, or will solve it} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{3}{r@{}}{\small\emph{continued on the next page}}\\
+\endfoot
+\bottomrule
+\endlastfoot
+
+Late start of implementation &
+The first part of the semester went into research and design: data sources,
+architecture and the GPU plan. Coding started on 28 October. &
+We worked in short phases, with tests and linters before every commit. The
+website, the data pipeline and the first trained model were finished within the
+semester. \\
+\addlinespace
+
+No GPU &
+The RTX 5090 has not arrived and NU HPC access has not been requested yet, so
+all training ran on an 8-core laptop CPU. &
+Models sit behind an interface that swaps placeholder models for real ones by
+configuration. Gradient-boosted models were trained on CPU. LLM news sentiment
+and the LLM trade reviewer moved to spring; a rule-based reviewer runs
+meanwhile. A day-by-day GPU plan is ready. \\
+\addlinespace
+
+Scope differs from the requirements document &
+The requirements document specified the StockNet benchmark (2014--2015 tweets),
+next-day direction and a stacking meta-learner with news sentiment. The built
+system uses live data for US and Kazakhstan stocks, a 5-day horizon and an
+averaged LightGBM + XGBoost ensemble without sentiment. &
+In spring we add news sentiment and run the price-only vs.\ sentiment ablation
+from the original plan, including a StockNet benchmark run for comparison with
+published results. \\
+\addlinespace
+
+Accuracy below a trivial baseline &
+The first model reached 52.5\% accuracy, below the 54.6\% of always predicting
+``up'', because it mostly guessed the direction of the whole market. &
+We changed the label to ``beats the day's median return'', added
+cross-sectional rank features and averaged LightGBM with XGBoost. The ranking
+signal rose from IC~0.013 to 0.023 ($t = 4.2$), and every metric is now
+reported next to a simple baseline. \\
+\addlinespace
+
+No profit after costs &
+The v2 strategy's Sharpe ratio (1.38) only ties the equal-weight benchmark
+(1.36), with higher risk, and a plain 21-day momentum rule does better (1.55). &
+The model stays in demo mode under a promotion rule fixed before testing, and
+the website shows a ``Demo predictions'' badge. Spring: a beta-neutral label and
+volatility-scaled positions. \\
+\addlinespace
+
+Survivorship bias &
+The stock universe is today's 100 most liquid companies, the winners of recent
+years. This inflates backtest returns and flatters momentum rules. &
+Documented in the data report. Spring: build the universe from historical index
+membership on each date. \\
+\addlinespace
+
+Risk of look-ahead bias &
+Company filings are often published after the market close and macro data are
+revised later, so naive date joins leak future information. &
+Each value enters only after its publication time (SEC acceptance timestamp,
+first-release macro values). An automated test checks that adding future data
+never changes past features. Design choices used 2016--2018 only; 2019--2026
+was scored once. \\
+\addlinespace
+
+Gaps and quirks in data sources &
+FRED serves the high-yield credit spread only from October 2023. Tradernet
+blocked requests whose User-Agent held a URL, and returns bars in an unusual
+column order with Moscow-midnight timestamps. HTTP logs exposed the FRED key,
+and an NBK outage stopped a backfill. &
+We removed the credit spread, changed the User-Agent, fixed the column order
+and time zone, stopped logging full URLs, and made jobs resumable with per-day
+error handling. \\
+\addlinespace
+
+More data did not help &
+SEC fundamentals and industry features lowered the development-period ranking
+signal from IC~0.030 to between 0.007 and 0.027. &
+They are not used in the 5-day model and are kept for the 1--12-month models
+planned for spring. \\
+\addlinespace
+
+Kazakhstan data access &
+The only free KASE price source is a broker API without published terms; the
+official KASE API is paid. AIX has no free data, and some Kazakh news sites
+block RSS. &
+The prototype uses the broker API at a low request rate, for non-commercial use
+only, and covers AIX companies through their KASE listings. Spring: request
+academic access from KASE. \\
+\addlinespace
+
+Deployment and tooling &
+nginx returned HTTP 502 after a container was recreated because it cached the
+old IP address. The database port clashed with another service. CI had never
+run because the repository was not on GitHub. &
+nginx now resolves services on every request, and the database moved to port
+55433. The repository was pushed on 26 November, and the first CI run passed in
+3~min 19~s. \\
+
+\end{longtable}
+}
+
+\section{Plans for Spring}
+\label{sec:spring}
+
+Spring adds the parts that need a GPU and fixes the evaluation problems found
+this semester. The key result will be the price-only vs.\ price-plus-sentiment
+ablation promised in the requirements document. Table~\ref{tab:spring} gives the
+plan by month.
+
+{\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.11\linewidth}
+                    >{\raggedright\arraybackslash}p{0.52\linewidth}
+                    >{\raggedright\arraybackslash}p{0.30\linewidth}@{}}
+\caption{Plan for the Spring 2027 semester.}
+\label{tab:spring}\\
+\toprule
+\textbf{Month} & \textbf{Work} & \textbf{Done when} \\
+\midrule
+\endfirsthead
+\multicolumn{3}{@{}l}{\small\emph{Table~\ref{tab:spring} continued}}\\
+\toprule
+\textbf{Month} & \textbf{Work} & \textbf{Done when} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{3}{r@{}}{\small\emph{continued on the next page}}\\
+\endfoot
+\bottomrule
+\endlastfoot
+
+January &
+Request NU HPC access and set up the RTX 5090 when it arrives. Build a
+point-in-time stock universe from historical index membership. Download the
+Alpaca news archive and add Finnhub or Alpha Vantage news. &
+The GPU environment passes our verification script; the universe and the news
+archive are in the data lake. \\
+\addlinespace
+
+February &
+Score news sentiment in English, Russian and Kazakh. Compare FinBERT, a
+zero-shot LLM API and a small open model on a hand-labelled test set. Run the
+ablation price-only vs.\ price plus sentiment, on our data and on the StockNet
+benchmark. &
+An ablation table with accuracy, F1, MCC and Sharpe ratio for both data sets. \\
+\addlinespace
+
+March &
+Fine-tune an open LLM with QLoRA on HPC. Add the stacking meta-learner and a
+beta-neutral label. Connect the LLM trade reviewer to the sandbox, keeping the
+rule-based reviewer as a fallback. &
+The fine-tuned model beats the zero-shot baseline on held-out labelled news; the
+reviewer returns valid verdicts for test trades in all three languages. \\
+\addlinespace
+
+April &
+Build the Kazakhstan model, using next-session signals from London and NASDAQ
+listings, Brent oil and USD/KZT. Train 1--12-month ranking models with the
+fundamentals features already built. Request academic KASE data access, add a
+nightly prediction job, and run user tests to improve the UI. &
+KASE and long-horizon predictions appear on the website; user-test findings are
+fixed. \\
+\addlinespace
+
+May &
+Final evaluation on data not used for any design choice; final report and
+presentation. &
+Report and presentation submitted. \\
+
+\end{longtable}
+}

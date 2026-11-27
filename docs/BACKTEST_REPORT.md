@@ -57,7 +57,7 @@ Baselines use the same portfolio rule, so the strategy columns compare signals, 
 | Accuracy at 0.5 | 52.5 % — **below** "always up" (54.6 %) | 51.0 % — above the best constant guess (50.2 %) |
 | Precision / recall, positive class | 55.1 % / 70.2 % | 50.7 % / 50.3 % |
 | Precision / recall, negative class | 46.5 % / 31.2 % | 51.2 % / 51.6 % |
-| Share of rows predicted positive | 69.6 % (15 %–99.9 % by year) | 49.4 % (42 %–62 % by year) |
+| Share of rows predicted positive | 69.6 % (12.6 %–99.2 % by year) | 49.4 % (42 %–62 % by year) |
 | Log-loss (ln 2 = 0.693) | 0.752 (over-confident) | 0.696 |
 | Rank IC (t-stat) | 0.013 (2.8) | **0.023 (4.2)** |
 | Strategy Sharpe — old rule (top 10 %, no band) | 0.92 | — |
@@ -74,7 +74,7 @@ So of the Sharpe gain from 0.92 to 1.38, about 0.25 comes from the low-turnover 
 
 ## Reading the numbers
 1. **The ranking signal roughly doubled** (IC 0.013 → 0.023, t 2.8 → 4.2) and the model stopped guessing the market
-   direction: v1 said "up" for 99.9 % of 2024 and 15 % of 2019; v2's share of positive calls stays between 42 % and 62 %.
+   direction: v1 said "up" for 99.2 % of 2024 and 12.6 % of 2019; v2's share of positive calls stays between 42 % and 62 %.
 2. **It is still not a strategy.** The ensemble's Sharpe (1.38) only ties the benchmark (1.36); it earns a higher CAGR
    by taking more risk (vol 40 % vs 24 %, max drawdown −64 % vs −33 %). Large gain importance of `beta_63`, `vol_63`
    and the rate features shows a tilt towards high-beta stocks, which beat the median when the market rises.

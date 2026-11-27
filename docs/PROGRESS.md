@@ -96,3 +96,8 @@
 - **Result:** all variants lower the dev IC → v2 unchanged, test folds not run (D-034, `docs/ABLATION_DEV_V3.md`). Gaps: no E/P for ASML, TSM, NU, KSPI, V, XOM, CBRS, SKHY, SPCX.
 - **Left:** use the fundamentals in the long-horizon (1–12 m) models; KZ lead–lag model; news counts (Alpaca news history not downloaded yet).
 
+
+### 2026-11-27 — v2 on the website, report sections
+- **Done:** lake refreshed to 2026-11-27 (`backfill --what prices_us market macro --start 2026-10-20`); `batch_predict --as-of` scores the latest session on or before a date, so rows match the website's latest bar; v2 rows written for 2026-11-25 and 2026-11-27 (22 US tickers, `gbm-ens-cpu-32704ac5`, `is_demo = true`). LaTeX for the final report's §4c and §5 in `docs/report/`. v1 "share predicted up" corrected to 12.6 %–99.2 % by year (was quoted from recall).
+- **Verified:** `/api/v1/predictions/AAPL` and the AAPL ticker page show the 5-day card from `gbm-ens-cpu-32704ac5` (P(up) 52 %); other horizons still mock.
+- **Left:** no nightly job — after each new session run the lake refresh + `batch_predict --as-of <date>` by hand.

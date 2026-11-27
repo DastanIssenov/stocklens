@@ -71,10 +71,19 @@ def _score_members(bundle: Path, meta: dict[str, Any], X: pd.DataFrame) -> tuple
 
 
 def predict_latest(
-    bundle: Path = BUNDLE, lake: Path = REPO / "data" / "lake"
+    bundle: Path = BUNDLE, lake: Path = REPO / "data" / "lake", as_of: str | None = None
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Score each symbol's latest session, or its latest session on or before `as_of` (YYYY-MM-DD) — used to
+    match the website, which shows predictions only for its own latest stored bar."""
     meta = json.loads((bundle / "meta.json").read_text())
     data = load_lake({"data": {"prices": "prices_us", "start": "1900-01-01"}}, lake)
+    if as_of:
+        cut = pd.Timestamp(as_of)
+        data.prices = data.prices[pd.to_datetime(data.prices["date"]) <= cut]
+        if data.market is not None:
+            data.market = data.market[pd.to_datetime(data.market["date"]) <= cut]
+        if data.macro is not None:
+            data.macro = data.macro[pd.to_datetime(data.macro["available_at"]) <= cut]
     prices = data.prices
     data.prices = prices[
         pd.to_datetime(prices["date"]) >= pd.to_datetime(prices["date"]).max() - pd.Timedelta(days=500)
@@ -163,8 +172,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m ml.serving.batch_predict")
     ap.add_argument("--database-url", required=True)
     ap.add_argument("--bundle", type=Path, default=BUNDLE)
+    ap.add_argument(
+        "--as-of", default=None, help="score the latest session on or before this date (YYYY-MM-DD)"
+    )
     a = ap.parse_args(argv)
-    df, meta = predict_latest(a.bundle)
+    df, meta = predict_latest(a.bundle, as_of=a.as_of)
     n = write(df, meta, a.database_url)
     print(f"wrote {n} predictions (model {model_version(meta)}, promoted={promoted(meta)})")
     return 0

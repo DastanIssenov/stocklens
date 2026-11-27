@@ -129,7 +129,7 @@ Newest decisions are appended at the bottom.
 
 ### D-032 — Short-term model v2: rank label, dev-fold selection, ensemble (2026-11-26)
 - **Decision:** the 5-day model predicts `xup_5` (stock beats the day's median 5-day return) instead of `up_5`; features = v1 + 12 within-day ranks − `hy_spread`; score = mean of LightGBM and XGBoost; strategy = top 10 % with a top-30 % hold band and a 3-day score EMA. Every choice was made on dev folds 2016–2018 (`ml/experiments/ablation.py`, `docs/ABLATION_DEV.md`); 2019–2026 was evaluated once.
-- **Why:** v1's top features were market-level, so it timed the market (it said "up" for 15 %–99.9 % of a year) and its accuracy was below "always up". A 50/50 cross-sectional label makes the model rank stocks, which is what the strategy and the website use. The hold band halves turnover, which ate v1's edge.
+- **Why:** v1's top features were market-level, so it timed the market (it said "up" for 12.6 %–99.2 % of a year's predictions) and its accuracy was below "always up". A 50/50 cross-sectional label makes the model rank stocks, which is what the strategy and the website use. The hold band halves turnover, which ate v1's edge.
 - **Rejected on dev folds:** residual returns, SEC-filing / earnings-reaction features, macro changes, dropping macro levels or calendar, stronger regularisation (all lowered dev IC).
 - **Result:** IC 0.013 → 0.023 (t 4.2), Sharpe 0.92 → 1.38 vs benchmark 1.36; still not promoted (AUC 0.505 < 0.52; the 21-day momentum baseline does better on strategy metrics). See `docs/BACKTEST_REPORT.md`.
 
